@@ -1,0 +1,4 @@
+
+float4 TestRGBA(){
+    return float4(1,0,0,1);
+}
