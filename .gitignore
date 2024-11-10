@@ -81,3 +81,7 @@ DerivedDataCache/*
 /Binaries/Win64
 /Plugins/USFConnector/Binaries
 /Plugins/Developer
+/Content/MegaMagicVFXBundle
+/Content/sA_Megapack_v1
+/Content/VFX_Bundle_2
+/.autosave
