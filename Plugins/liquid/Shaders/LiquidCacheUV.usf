@@ -1,0 +1,28 @@
+#pragma once
+
+//x: main u
+//y: main v
+//z: distortion u
+//w: distortion v
+static MaterialFloat4 UVParameterCache = MaterialFloat4(.0, .0, .0, .0);
+
+void SetMainUV(MaterialFloat2 UV)
+{
+    UVParameterCache.xy = UV;
+}
+
+MaterialFloat2 GetMainUV()
+{
+    return UVParameterCache.xy;
+}
+
+void SetDistortionUV(MaterialFloat2 UV)
+{
+    UVParameterCache.zw = UV;
+}
+
+MaterialFloat2 GetDistortionUV()
+{
+    return  UVParameterCache.zw;
+}
+
