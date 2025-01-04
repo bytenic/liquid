@@ -1,0 +1,16 @@
+#pragma once
+
+
+static MaterialFloat4 DebugFloat4Color = MaterialFloat4(.0, .0, .0, .0);
+
+void SetDebugFloat4Color(MaterialFloat4 Float4Color)
+{
+    DebugFloat4Color = Float4Color;
+}
+
+MaterialFloat4 GetDebugFloat4Color()
+{
+    return DebugFloat4Color;
+}
+
+
