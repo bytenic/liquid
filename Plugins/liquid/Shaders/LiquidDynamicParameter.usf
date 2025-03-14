@@ -1,0 +1,43 @@
+#pragma once 
+
+//x: custom scale u
+//y: custom scale v
+//z: custom offset u
+//w: custom offset v
+static MaterialFloat4 DynamicParameterSlot1 = MaterialFloat4(1.0, 1.0, .0, .0);
+
+void SetDynamicParameterSlot1(MaterialFloat4 SlotParameter)
+{
+    DynamicParameterSlot1 = SlotParameter;
+}
+
+MaterialFloat4 GetCustomUVScaleAndOffset()
+{
+    return DynamicParameterSlot1;
+}
+
+//x: Dissolve Clip Value
+//y: FlipBook Animation Phase
+//z: Distortion Scale
+//w: Free
+static MaterialFloat4 DynamicParameterSlot2 = MaterialFloat4(.0, .0, .0, .0);
+
+void SetDynamicParameterSlot2(MaterialFloat4 SlotParameter)
+{
+    DynamicParameterSlot2 = SlotParameter;
+}
+
+float GetDissolveClipValue()
+{
+    return DynamicParameterSlot2.x;
+}
+
+float GetFlipBookAnimationPhase()
+{
+    return DynamicParameterSlot2.y;
+}
+
+float GetDistortionScale()
+{
+    return DynamicParameterSlot2.z;
+}
