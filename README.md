@@ -1,19 +1,17 @@
 # Liquid
-
-# 実装している機能
-## UV Animation
+## Implemented
+### UV Animation
 - Scaling
 - Scroll
+- Rotation
 - Shear
 - Radial UV
+    - Mitigation Artifact
 - Random Offset
-- UV Animations
-- UV Animation Dynamic Parameter
-- UV Distortion
+- Dynamic Parameter Scale Offset
+- Distortion
 - UV FlipBook
-- UV Distortion
-
-## Material Layer
+### Material Layer
 - Color Texture Sampling
 - Alpha Texture Sampling
 - Procedural Circle Mask
@@ -22,16 +20,32 @@
 - Procedural UV Mask
 - Scene Color Distortion
 - 6 Point Light
-
-## Material Blend
+### Material Blend
 - Mask
 - Dissolve
     - Emissive Edge Color
     - Directional Dissolve
 - Gradient Color
+    - Color Gradient
+    - Alpha Gradient
 - Texture Blend
     - Additive
     - Multiply
 - Depth Fade
 - Gradient Color Dissolve
 - Scaling Sprite
+- Dither Alpha
+## Load Map
+- Fresnel
+- Fresnel Gradient
+- Fake Point Light(Ignore Collision)
+- Cutoff
+- Two Sided Gradient
+- Camera Offset
+- Cut Off
+- Decal Support
+- Lit Support
+- Parallax Occlusion
+- Height Fade
+- Circular Sector Mask
+- Inverse Eye Adaptation
