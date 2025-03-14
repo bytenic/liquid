@@ -34,4 +34,4 @@
     - Multiply
 - Depth Fade
 - Gradient Color Dissolve
-- 
+- Scaling Sprite
