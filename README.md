@@ -32,6 +32,7 @@
 - Texture Blend
     - Additive
     - Multiply
+    - Subtract
 - Depth Fade
 - Scaling Sprite
 - Dither Alpha
