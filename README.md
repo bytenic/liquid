@@ -28,13 +28,15 @@
 - Gradient Color
     - Color Gradient
     - Alpha Gradient
+- Gradient Color Dissolve
 - Texture Blend
     - Additive
     - Multiply
 - Depth Fade
-- Gradient Color Dissolve
 - Scaling Sprite
 - Dither Alpha
+- Rim Fade
+- Rim Gradient
 ## Load Map
 - Fresnel
 - Fresnel Gradient
@@ -49,3 +51,4 @@
 - Height Fade
 - Circular Sector Mask
 - Inverse Eye Adaptation
+- Texel Level Clamp
