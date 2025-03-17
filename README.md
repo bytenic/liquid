@@ -38,10 +38,10 @@
 - Dither Alpha
 - Rim Fade
 - Rim Gradient
+- Fake Point Light(Ignore Collision)
 ## Load Map
 - Fresnel
 - Fresnel Gradient
-- Fake Point Light(Ignore Collision)
 - Cutoff
 - Two Sided Gradient
 - Camera Offset
