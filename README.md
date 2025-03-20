@@ -1,4 +1,11 @@
 # Liquid
+## Materials
+- Unlit
+    - Masked
+    - Translucent
+- Default Lit
+    - Opaque
+    - Masked
 ## Implemented
 ### UV Animation
 - Scaling
@@ -12,19 +19,21 @@
 - Distortion
 - UV FlipBook
 ### Material Layer
-- Color Texture Sampling
+- sRGB Color Texture Sampling
+- Linear Color Texture Sampling
 - Alpha Texture Sampling
 - Normal Texture Sampling
-- Procedural Circle Mask
-- Procedural Triangle Mask
-- Procedural Quad Mask
-- Procedural UV Mask
+- Procedural Mask
+    - Circle
+    - Triangle
+    - Quad
+    - UV
 - Scene Color Distortion
 - 6 Point Light
 ### Material Blend
 - Mask
 - Dissolve
-    - Emissive Edge Color
+    - Edge Color
     - Directional Dissolve
 - Gradient Color
     - Color Gradient
@@ -49,7 +58,6 @@
 - Camera Offset
 - Cut Off
 - Decal Support
-- Lit Support
 - Parallax Occlusion
 - Height Fade
 - Circular Sector Mask
