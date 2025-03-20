@@ -6,6 +6,7 @@
 - Default Lit
     - Opaque
     - Masked
+- Inverse Eye Adaptation
 ## Implemented
 ### UV Animation
 - Scaling
@@ -61,5 +62,4 @@
 - Parallax Occlusion
 - Height Fade
 - Circular Sector Mask
-- Inverse Eye Adaptation
 - Texel Level Clamp
