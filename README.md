@@ -14,6 +14,7 @@
 ### Material Layer
 - Color Texture Sampling
 - Alpha Texture Sampling
+- Normal Texture Sampling
 - Procedural Circle Mask
 - Procedural Triangle Mask
 - Procedural Quad Mask
@@ -39,6 +40,7 @@
 - Rim Fade
 - Rim Gradient
 - Fake Point Light(Ignore Collision)
+- Emissive Normal
 ## Load Map
 - Fresnel
 - Fresnel Gradient
