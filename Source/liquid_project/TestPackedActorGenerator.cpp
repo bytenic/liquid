@@ -19,7 +19,7 @@ class FContentBrowserModule;
 
 UBlueprint* CreatePackedLevelActorBlueprint(TSoftObjectPtr<UBlueprint> InBlueprintAsset, TSoftObjectPtr<UWorld> InWorldAsset, bool bInCompile)
 {
-	IAssetTools& AssetTools = FAssetToolsModule::GetModule().Get();
+	/*IAssetTools& AssetTools = FAssetToolsModule::GetModule().Get();
 
 	UBlueprintFactory* BlueprintFactory = NewObject<UBlueprintFactory>();
 	BlueprintFactory->ParentClass = APackedLevelActor::StaticClass();
@@ -45,14 +45,14 @@ UBlueprint* CreatePackedLevelActorBlueprint(TSoftObjectPtr<UBlueprint> InBluepri
 
 			return NewBP;
 		}
-	}
+	}*/
 
 	return nullptr;
 }
 
 bool UTestPackedActorGenerator::GenerateActor()
 {
-	FSaveAssetDialogConfig SaveAssetDialogConfig;
+	/*FSaveAssetDialogConfig SaveAssetDialogConfig;
 	SaveAssetDialogConfig.DialogTitleOverride = FText::Format(LOCTEXT("Save as", "Save As"));
 	SaveAssetDialogConfig.DefaultPath = FPaths::GetPath(InBlueprintAsset.GetLongPackageName());
 	SaveAssetDialogConfig.DefaultAssetName = InBlueprintAsset.GetAssetName();
@@ -71,7 +71,7 @@ bool UTestPackedActorGenerator::GenerateActor()
 		}
 				
 		return CreatePackedLevelActorBlueprint(ExistingBPAsset, InWorldAsset, true);
-	}
+	}*/
 	return true;
 }
 
