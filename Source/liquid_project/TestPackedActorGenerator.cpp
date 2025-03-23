@@ -7,6 +7,8 @@
 #include "ContentBrowserModule.h"
 #include "EditorDirectories.h"
 #include "IContentBrowserSingleton.h"
+#include "LevelInstanceEditorSettings.h"
+#include "Selection.h"
 #include "PackedLevelActor/PackedLevelActorBuilder.h"
 #include "Factories/BlueprintFactory.h"
 #include "Kismet2/KismetEditorUtilities.h"
@@ -49,9 +51,36 @@ UBlueprint* CreatePackedLevelActorBlueprint(TSoftObjectPtr<UBlueprint> InBluepri
 
 	return nullptr;
 }
-
+#if WITH_EDITOR
 bool UTestPackedActorGenerator::GenerateActor()
 {
+	//ULevelInstanceSubsystem* LevelInstanceSubsystem = GEditor->GetEditorWorldContext().World()->GetSubsystem<ULevelInstanceSubsystem>();
+	//if(!LevelInstanceSubsystem)
+	//{
+	//	UE_LOG(LogTemp, Verbose, TEXT("LevelInstanceSubsystem is nullptr"));
+	//	return false;
+	//}
+	
+	TArray<AActor*> SelectionActors;
+	//GEditor->GetSelectedActors()->GetSelectedObjects<AActor>(SelectionActors);
+	if(SelectionActors.IsEmpty())
+	{
+		UE_LOG(LogTemp, Verbose, TEXT("SelectionActors is empty"));
+		return false;
+	}
+	/*if(!LevelInstanceSubsystem->CanCreateLevelInstanceFrom(SelectionActors))
+	{
+		UE_LOG(LogTemp, Verbose, TEXT("CanCreateLevelInstanceFrom return false"));
+		return false;
+	}*/
+
+	//const bool bForceExternalActors = LevelInstanceSubsystem->GetWorld()->IsPartitionedWorld();
+	FNewLevelInstanceParams Params;
+	Params.Type = ELevelInstanceCreationType::PackedLevelActor;
+	//Params.PivotType = GetDefault<ULevelInstanceEditorPerProjectUserSettings>()->PivotType;
+	Params.PivotActor = SelectionActors[0];
+	Params.HideCreationType();
+	Params.SetForceExternalActors(false);
 	/*FSaveAssetDialogConfig SaveAssetDialogConfig;
 	SaveAssetDialogConfig.DialogTitleOverride = FText::Format(LOCTEXT("Save as", "Save As"));
 	SaveAssetDialogConfig.DefaultPath = FPaths::GetPath(InBlueprintAsset.GetLongPackageName());
@@ -74,5 +103,6 @@ bool UTestPackedActorGenerator::GenerateActor()
 	}*/
 	return true;
 }
+#endif
 
 #undef LOCTEXT_NAMESPACE
