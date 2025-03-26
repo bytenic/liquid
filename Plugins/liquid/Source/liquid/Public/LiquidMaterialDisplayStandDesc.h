@@ -40,6 +40,8 @@ struct FLiquidMaterialDisplayStandElement
 	UPROPERTY(BlueprintReadOnly, EditAnywhere)
 	ELiquidDisplayStandShapeType ShapeType{};
 	UPROPERTY(BlueprintReadOnly, EditAnywhere)
+	FVector InitialOrientation{90.0,0.0,90.0};
+	UPROPERTY(BlueprintReadOnly, EditAnywhere)
 	FText Title{};
 	UPROPERTY(BlueprintReadOnly, EditAnywhere)
 	FText Desc{};
