@@ -29,6 +29,7 @@
     - Triangle
     - Quad
     - UV
+    - Super Ellipse
 - Scene Color Distortion
 - 6 Point Light
 ### Material Blend
