@@ -59,7 +59,7 @@
 - Two Sided Gradient
 - Camera Offset
 - Cut Off
-- Decal Support
+- Decal Material
 - Parallax Occlusion
 - Height Fade
 - Circular Sector Mask
