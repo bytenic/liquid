@@ -1,4 +1,8 @@
 # Liquid
+
+## Asset Folder
+- Materials: /All/Plugins/liquid/materials
+- Samples: /All/Plugins/liquid/materials/tests
 ## Materials
 - Unlit
     - Masked
