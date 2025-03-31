@@ -85,3 +85,5 @@ DerivedDataCache/*
 /Content/sA_Megapack_v1
 /Content/VFX_Bundle_2
 /.autosave
+/polar_space_output.tga
+/StandardDistortion.hlsl
