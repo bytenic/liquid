@@ -87,3 +87,4 @@ DerivedDataCache/*
 /.autosave
 /polar_space_output.tga
 /StandardDistortion.hlsl
+/*.vsconfig
