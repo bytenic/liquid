@@ -38,7 +38,7 @@ public class liquid : ModuleRules
 				"Engine",
 				"Slate",
 				"SlateCore",
-				"RenderCore"
+				"RenderCore", "Niagara"
 				// ... add private dependencies that you statically link with here ...	
 			}
 			);
