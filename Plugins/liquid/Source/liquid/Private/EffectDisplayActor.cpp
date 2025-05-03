@@ -5,12 +5,9 @@
 #include "NiagaraComponent.h"
 #include "NiagaraSystem.h"
 #include "NiagaraFunctionLibrary.h"
-// Sets default values
+
 AEffectDisplayActor::AEffectDisplayActor()
 {
- 	// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
-	PrimaryActorTick.bCanEverTick = true;
-	//NiagaraComponent = CreateDefaultSubobject<UNiagaraComponent>(TEXT("NiagaraComponent0"));
 	PlaylistArray.Reserve(QueueCapacity);
 }
 
@@ -25,18 +22,12 @@ void AEffectDisplayActor::PlayEffect(TArray<UNiagaraSystem*> PlayList)
 	CurrentPlayIndex = InvalidPlayIndex;
 	
 	PlayNext();
-	
 }
 
 // Called when the game starts or when spawned
 void AEffectDisplayActor::BeginPlay()
 {
 	Super::BeginPlay();
-}
-
-void AEffectDisplayActor::Tick(float DeltaSeconds)
-{
-	Super::Tick(DeltaSeconds);
 }
 
 void AEffectDisplayActor::OnNiagaraSystemFinished(UNiagaraComponent* InComp)
