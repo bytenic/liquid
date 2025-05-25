@@ -19,18 +19,29 @@ public:
 	AEffectDisplayActor();
 
 public:
+	virtual void BeginPlay() override;
 	UFUNCTION(BlueprintCallable)
 	void PlayEffect(TArray<UNiagaraSystem*> PlaySystem);
+
+	UFUNCTION(BlueprintImplementableEvent)
+	void ExecuteAllEffectSequential();
 	
 protected:
-	// Called when the game starts or when spawned
-	virtual void BeginPlay() override;
 
 	UPROPERTY(EditAnywhere)
 	FVector EffectPlaceOffset{};
 	//private に移せるかも:
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite)
 	TObjectPtr<UNiagaraComponent> NiagaraComponent{};
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	TArray<FAssetData> NiagaraAssetArray{};
+
+	UPROPERTY(EditAnywhere)
+	FString NiagaraRootPath{};
+
+	UPROPERTY(EditAnywhere)
+	bool IsAutoPlay{true};
 	
 private:
 	UFUNCTION()

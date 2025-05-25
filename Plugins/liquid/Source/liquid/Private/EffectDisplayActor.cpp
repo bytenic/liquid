@@ -5,6 +5,8 @@
 #include "NiagaraComponent.h"
 #include "NiagaraSystem.h"
 #include "NiagaraFunctionLibrary.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/IAssetRegistry.h"
 
 AEffectDisplayActor::AEffectDisplayActor()
 {
@@ -28,6 +30,31 @@ void AEffectDisplayActor::PlayEffect(TArray<UNiagaraSystem*> PlayList)
 void AEffectDisplayActor::BeginPlay()
 {
 	Super::BeginPlay();
+	const FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+	const IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
+
+	FARFilter Filter;
+	Filter.PackagePaths.Add(*NiagaraRootPath);
+	Filter.bRecursivePaths = true;
+	Filter.bIncludeOnlyOnDiskAssets = false;
+
+	// アセットの検索
+	AssetRegistry.GetAssets(Filter, NiagaraAssetArray);
+	if(NiagaraAssetArray.IsEmpty())
+	{
+		UE_LOG(LogTemp, Verbose,TEXT("not found niagara system in %s "), *NiagaraRootPath);
+	}
+	else
+	{
+		for(const auto& it : NiagaraAssetArray)
+		{
+			UE_LOG(LogTemp, Verbose,TEXT("%s"), *it.AssetName.ToString());
+		}
+	}
+	if(IsAutoPlay)
+	{
+		ExecuteAllEffectSequential();
+	}
 }
 
 void AEffectDisplayActor::OnNiagaraSystemFinished(UNiagaraComponent* InComp)
