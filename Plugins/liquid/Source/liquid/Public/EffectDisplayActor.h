@@ -20,6 +20,7 @@ public:
 
 public:
 	virtual void BeginPlay() override;
+
 	UFUNCTION(BlueprintCallable)
 	void PlayEffect(TArray<UNiagaraSystem*> PlaySystem);
 
@@ -27,7 +28,7 @@ public:
 	void ExecuteAllEffectSequential();
 	
 protected:
-
+	virtual void Tick(float DeltaTime)override;
 	UPROPERTY(EditAnywhere)
 	FVector EffectPlaceOffset{};
 	//private に移せるかも:
@@ -42,6 +43,12 @@ protected:
 
 	UPROPERTY(EditAnywhere)
 	bool IsAutoPlay{true};
+
+	UPROPERTY(EditAnywhere)
+	float RotateSpeed{.0f};
+	
+	UPROPERTY(EditAnywhere)
+	float PlayInterval{5.0f};
 	
 private:
 	UFUNCTION()
@@ -51,6 +58,7 @@ private:
 	void ClearPlaylistQueue();
 	bool PlayNext();
 	bool IsPlaying() const;
+	void RotationNiagaraSystem(float DeltaTime);
 
 private:
 	static constexpr int32 QueueCapacity = 64;

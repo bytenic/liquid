@@ -5,12 +5,15 @@
 #include "NiagaraComponent.h"
 #include "NiagaraSystem.h"
 #include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystemInstance.h"
+#include "NiagaraSystemInstanceController.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
 
 AEffectDisplayActor::AEffectDisplayActor()
 {
 	PlaylistArray.Reserve(QueueCapacity);
+	PrimaryActorTick.bCanEverTick = true;
 }
 
 void AEffectDisplayActor::PlayEffect(TArray<UNiagaraSystem*> PlayList)
@@ -24,6 +27,36 @@ void AEffectDisplayActor::PlayEffect(TArray<UNiagaraSystem*> PlayList)
 	CurrentPlayIndex = InvalidPlayIndex;
 	
 	PlayNext();
+}
+
+void AEffectDisplayActor::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+	if (!NiagaraComponent)
+		return;
+
+	RotationNiagaraSystem(DeltaTime);
+
+	if(!NiagaraComponent->IsActive())
+		return;
+
+	const auto NiagaraSystem = NiagaraComponent->GetAsset();
+	if(!NiagaraSystem)
+	{
+		return;
+	}
+	
+	const auto SystemInstanceController = NiagaraComponent->GetSystemInstanceController();
+	if(!SystemInstanceController.IsValid())
+	{
+		return;
+	}
+	const auto CurrentAge =SystemInstanceController->GetAge();
+	if(CurrentAge >= PlayInterval)
+	{
+		NiagaraComponent->DestroyComponent();
+		PlayNext();
+	}
 }
 
 // Called when the game starts or when spawned
@@ -116,5 +149,9 @@ bool AEffectDisplayActor::IsPlaying() const
 	return !NiagaraComponent->IsActive() || CurrentPlayIndex > 0;
 }
 
-
-
+void AEffectDisplayActor::RotationNiagaraSystem(float DeltaTime)
+{
+	FRotator CurrentRotation = NiagaraComponent->GetRelativeRotation();
+	CurrentRotation.Yaw += RotateSpeed * DeltaTime;
+	NiagaraComponent->SetRelativeRotation(CurrentRotation);
+}
