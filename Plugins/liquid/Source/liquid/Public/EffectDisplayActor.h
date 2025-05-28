@@ -59,6 +59,7 @@ private:
 	bool PlayNext();
 	bool IsPlaying() const;
 	void RotationNiagaraSystem(float DeltaTime);
+	//bool HasInfiniteLifetimeEmitters(const UNiagaraComponent* NiagaraSystem)const;
 
 private:
 	static constexpr int32 QueueCapacity = 64;

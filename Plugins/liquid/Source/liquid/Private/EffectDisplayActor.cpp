@@ -9,6 +9,7 @@
 #include "NiagaraSystemInstanceController.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
+#include "Tests/AutomationEditorCommon.h"
 
 AEffectDisplayActor::AEffectDisplayActor()
 {
@@ -45,16 +46,22 @@ void AEffectDisplayActor::Tick(float DeltaTime)
 	{
 		return;
 	}
-	
+	//auto LoopBehavior = NiagaraSystem->GetSystemStateData().LoopBehavior;
+	//if(LoopBehavior != ENiagaraLoopBehavior::Infinite)
+	//{
+	//	return;
+	//}
 	const auto SystemInstanceController = NiagaraComponent->GetSystemInstanceController();
 	if(!SystemInstanceController.IsValid())
 	{
 		return;
 	}
 	const auto CurrentAge =SystemInstanceController->GetAge();
+	//SystemInstanceController->
+	UE_LOG(LogTemp, Log,TEXT("CurrentAge %f "), CurrentAge);
 	if(CurrentAge >= PlayInterval)
 	{
-		NiagaraComponent->DestroyComponent();
+		StopCurrentPlayEffect();
 		PlayNext();
 	}
 }
@@ -75,13 +82,13 @@ void AEffectDisplayActor::BeginPlay()
 	AssetRegistry.GetAssets(Filter, NiagaraAssetArray);
 	if(NiagaraAssetArray.IsEmpty())
 	{
-		UE_LOG(LogTemp, Verbose,TEXT("not found niagara system in %s "), *NiagaraRootPath);
+		UE_LOG(LogTemp, Log,TEXT("not found niagara system in %s "), *NiagaraRootPath);
 	}
 	else
 	{
 		for(const auto& it : NiagaraAssetArray)
 		{
-			UE_LOG(LogTemp, Verbose,TEXT("%s"), *it.AssetName.ToString());
+			UE_LOG(LogTemp, Log, TEXT("%s"), *it.AssetName.ToString());
 		}
 	}
 	if(IsAutoPlay)
@@ -137,8 +144,14 @@ bool AEffectDisplayActor::PlayNext()
 		true);
 	if(!NiagaraComponent)
 		return false;
-	NiagaraComponent->OnSystemFinished.AddDynamic(this,
-		&AEffectDisplayActor::OnNiagaraSystemFinished);
+
+	//if(!HasInfiniteLifetimeEmitters(NiagaraComponent))
+	//{
+	//	NiagaraComponent->OnSystemFinished.AddDynamic(this,
+	//	&AEffectDisplayActor::OnNiagaraSystemFinished);
+	//}
+	
+	
 	return true;
 }
 
@@ -155,3 +168,69 @@ void AEffectDisplayActor::RotationNiagaraSystem(float DeltaTime)
 	CurrentRotation.Yaw += RotateSpeed * DeltaTime;
 	NiagaraComponent->SetRelativeRotation(CurrentRotation);
 }
+
+/*bool AEffectDisplayActor::HasInfiniteLifetimeEmitters(const UNiagaraComponent* Component)const
+{
+	if (!Component)
+	{
+		return false;
+	}
+	const auto NiagaraSystem = NiagaraComponent->GetAsset();
+	if(!NiagaraSystem)
+	{
+		return false;
+	}
+	const auto LoopBehavior = NiagaraSystem->GetSystemStateData().LoopBehavior;
+	if(LoopBehavior == ENiagaraLoopBehavior::Infinite)
+	{
+		return true;
+	}
+	const auto SystemInstance = Component->GetSystemInstance();
+
+
+	for(const auto & Handle :NiagaraSystem->GetEmitterHandles())
+	{
+		FVersionedNiagaraEmitterData* EmitterData = Handle.GetEmitterData();
+		EmitterData->EmitterUpdateScriptProps.Script->GetVMExecutableData(
+		UE_LOG(LogTemp, Log,TEXT("CurrentAge"));
+	}
+	
+	if(!SystemInstance)
+	{
+		return false;
+	}
+	const auto EmitterInstances = SystemInstance->GetEmitters();
+	for (const auto& EmitterInstance : EmitterInstances)
+	{
+		
+		const UNiagaraEmitter* Emitter = EmitterInstance->GetEmitter();
+		
+		if (!Emitter)
+		{
+			continue;
+		}
+		const FVersionedNiagaraEmitterData* EmitterData = Emitter->GetLatestEmitterData();
+		if(!EmitterData)
+		{
+			continue;
+		}
+		const UNiagaraScript* UpdateScript = EmitterData->EmitterUpdateScriptProps.Script;
+		if(!UpdateScript)
+		{
+			continue;
+		}
+		const FNiagaraVMExecutableData& VMData = UpdateScript->GetVMExecutableData();
+		
+		const auto& Parameters = VMData.BakedRapidIterationParameters;
+		//const auto EmitterLoopBehavior = Parameters.FindByPredicate());
+		//if(!EmitterLoopBehavior)
+		//{
+		//	continue;
+		//}
+		//LoopBehavior->
+		return false;
+	}
+
+	return false; // All emitters are finite
+}*/
+
