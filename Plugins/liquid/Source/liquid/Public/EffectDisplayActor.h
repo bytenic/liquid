@@ -15,17 +15,11 @@ class LIQUID_API AEffectDisplayActor : public AActor
 	GENERATED_BODY()
 	
 public:	
-	// Sets default values for this actor's properties
 	AEffectDisplayActor();
-
-public:
+	
 	virtual void BeginPlay() override;
-
 	UFUNCTION(BlueprintCallable)
-	void PlayEffect(TArray<UNiagaraSystem*> PlaySystem);
-
-	UFUNCTION(BlueprintImplementableEvent)
-	void ExecuteAllEffectSequential();
+	void PlayEffect();
 	
 protected:
 	virtual void Tick(float DeltaTime)override;
@@ -38,14 +32,13 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite)
 	TObjectPtr<UNiagaraComponent> NiagaraComponent{};
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly)
-	TArray<FAssetData> NiagaraAssetArray{};
-
 	UPROPERTY(EditAnywhere)
 	FString NiagaraRootPath{};
 
 	UPROPERTY(EditAnywhere)
 	bool IsAutoPlay{true};
+	UPROPERTY(EditAnywhere)
+	bool IsLoop{true};
 
 	UPROPERTY(EditAnywhere)
 	float RotateSpeed{.0f};
@@ -62,12 +55,13 @@ private:
 	bool PlayNext();
 	bool IsPlaying() const;
 	void RotationNiagaraSystem(float DeltaTime)const ;
+	bool LoadNiagaraSystems();
 
 private:
 	static constexpr int32 QueueCapacity = 64;
 	static constexpr int32 InvalidPlayIndex = -1;
+
+	UPROPERTY()
 	TArray<TObjectPtr<UNiagaraSystem>> PlaylistArray{};
 	int32 CurrentPlayIndex{-1};
-
-	
 };

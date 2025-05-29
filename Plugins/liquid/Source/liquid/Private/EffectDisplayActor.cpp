@@ -19,15 +19,8 @@ AEffectDisplayActor::AEffectDisplayActor()
 	
 }
 
-void AEffectDisplayActor::BeginPlay()
+bool AEffectDisplayActor::LoadNiagaraSystems()
 {
-	Super::BeginPlay();
-	const FVector Offset = GetActorForwardVector() * EffectPlaceOffset.X
-						+ GetActorRightVector() * EffectPlaceOffset.Y
-						+ GetActorUpVector() * EffectPlaceOffset.Z;
-	const FVector Location = GetActorLocation() + Offset;
-	RotationRoot->SetRelativeLocation(Location);
-	
 	const FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
 	const IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
 
@@ -37,34 +30,52 @@ void AEffectDisplayActor::BeginPlay()
 	Filter.bIncludeOnlyOnDiskAssets = false;
 
 	// アセットの検索
+	TArray<FAssetData> NiagaraAssetArray{};
+	NiagaraAssetArray.Reserve(32);
 	AssetRegistry.GetAssets(Filter, NiagaraAssetArray);
+
 	if(NiagaraAssetArray.IsEmpty())
 	{
 		UE_LOG(LogTemp, Log,TEXT("not found niagara system in %s "), *NiagaraRootPath);
+		return false;
 	}
-	else
+	for(const auto& Asset : NiagaraAssetArray)
 	{
-		for(const auto& it : NiagaraAssetArray)
+		UNiagaraSystem* System = Cast<UNiagaraSystem>(Asset.GetAsset());
+		if(System)
 		{
-			UE_LOG(LogTemp, Log, TEXT("%s"), *it.AssetName.ToString());
+			PlaylistArray.Add(System);	
 		}
 	}
-	if(IsAutoPlay)
+	return true;
+}
+
+void AEffectDisplayActor::BeginPlay()
+{
+	Super::BeginPlay();
+	const FVector Offset = GetActorForwardVector() * EffectPlaceOffset.X
+						+ GetActorRightVector() * EffectPlaceOffset.Y
+						+ GetActorUpVector() * EffectPlaceOffset.Z;
+	const FVector Location = GetActorLocation() + Offset;
+	RotationRoot->SetRelativeLocation(Location);
+	
+	if(LoadNiagaraSystems())
 	{
-		ExecuteAllEffectSequential();
+		if(IsAutoPlay)
+		{
+			PlayEffect();
+		}
 	}
 }
 
-void AEffectDisplayActor::PlayEffect(TArray<UNiagaraSystem*> PlayList)
+void AEffectDisplayActor::PlayEffect()
 {
 	if(IsPlaying())
 	{
 		StopCurrentPlayEffect();
 		ClearPlaylistQueue();
 	}
-	PlaylistArray = MoveTemp(PlayList);
 	CurrentPlayIndex = InvalidPlayIndex;
-	
 	PlayNext();
 }
 
@@ -138,9 +149,16 @@ bool AEffectDisplayActor::PlayNext()
 	CurrentPlayIndex++;
 	if(CurrentPlayIndex >= PlaylistArray.Num())
 	{
-		CurrentPlayIndex = InvalidPlayIndex;
-		UE_LOG(LogTemp, Log,TEXT("AEffectDisplayActor Finish Play Effect"));
-		return false;
+		if(IsLoop)
+		{
+			CurrentPlayIndex = 0;
+		}
+		else
+		{
+			CurrentPlayIndex = InvalidPlayIndex;
+			UE_LOG(LogTemp, Log,TEXT("AEffectDisplayActor Finish Play Effect"));
+			return false;
+		}
 	}
 	UNiagaraSystem* PlaySystem = PlaylistArray[CurrentPlayIndex];
 	NiagaraComponent = UNiagaraFunctionLibrary::SpawnSystemAttached(
@@ -179,3 +197,5 @@ void AEffectDisplayActor::RotationNiagaraSystem(float DeltaTime)const
 	CurrentRotation.Yaw += RotateSpeed * DeltaTime;
 	RotationRoot->SetRelativeRotation(CurrentRotation);
 }
+
+
