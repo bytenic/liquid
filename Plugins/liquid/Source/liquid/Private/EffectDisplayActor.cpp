@@ -11,8 +11,9 @@
 
 AEffectDisplayActor::AEffectDisplayActor()
 {
+	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 	RotationRoot = CreateDefaultSubobject<USceneComponent>(TEXT("RotationRoot"));
-	//RotationRoot->SetupAttachment(RootComponent);
+	RotationRoot->SetupAttachment(RootComponent);
 	PlaylistArray.Reserve(QueueCapacity);
 	PrimaryActorTick.bCanEverTick = true;
 	
@@ -21,6 +22,12 @@ AEffectDisplayActor::AEffectDisplayActor()
 void AEffectDisplayActor::BeginPlay()
 {
 	Super::BeginPlay();
+	const FVector Offset = GetActorForwardVector() * EffectPlaceOffset.X
+						+ GetActorRightVector() * EffectPlaceOffset.Y
+						+ GetActorUpVector() * EffectPlaceOffset.Z;
+	const FVector Location = GetActorLocation() + Offset;
+	RotationRoot->SetRelativeLocation(Location);
+	
 	const FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
 	const IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
 
@@ -136,15 +143,13 @@ bool AEffectDisplayActor::PlayNext()
 		return false;
 	}
 	UNiagaraSystem* PlaySystem = PlaylistArray[CurrentPlayIndex];
-	const FVector Offset = GetActorForwardVector() * EffectPlaceOffset.X
-							+ GetActorRightVector() * EffectPlaceOffset.Y
-							+ GetActorUpVector() * EffectPlaceOffset.Z;
-	const FVector Location = GetActorLocation() + Offset;
-	NiagaraComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-		GetWorld(),
-		PlaySystem,Location,
+	NiagaraComponent = UNiagaraFunctionLibrary::SpawnSystemAttached(
+		PlaySystem,
+		RotationRoot,
+		NAME_None,
+		FVector::Zero(),
 		FRotator::ZeroRotator,
-		FVector::One(),
+		EAttachLocation::KeepRelativeOffset,
 		true,
 		true);
 	if(!NiagaraComponent)
@@ -153,7 +158,6 @@ bool AEffectDisplayActor::PlayNext()
 		return false;
 	}
 	NiagaraComponent->SetAutoDestroy(true);
-	NiagaraComponent->AttachToComponent(RotationRoot, FAttachmentTransformRules::KeepWorldTransform);
 	UE_LOG(LogTemp, Log,TEXT("AEffectDisplayActor Begin Play %s"),*PlaySystem->GetName());
 	return true;
 }
@@ -169,7 +173,7 @@ bool AEffectDisplayActor::IsPlaying() const
 	return NiagaraComponent->IsActive() || CurrentPlayIndex > 0;
 }
 
-void AEffectDisplayActor::RotationNiagaraSystem(float DeltaTime)
+void AEffectDisplayActor::RotationNiagaraSystem(float DeltaTime)const
 {
 	FRotator CurrentRotation = RotationRoot->GetRelativeRotation();
 	CurrentRotation.Yaw += RotateSpeed * DeltaTime;

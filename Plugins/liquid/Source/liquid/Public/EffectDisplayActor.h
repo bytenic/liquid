@@ -30,7 +30,7 @@ public:
 protected:
 	virtual void Tick(float DeltaTime)override;
 	UPROPERTY(EditAnywhere)
-	FVector EffectPlaceOffset{};
+	FVector EffectPlaceOffset{100.0,.0,100.0};
 
 	UPROPERTY()
 	TObjectPtr<USceneComponent> RotationRoot{};
@@ -61,8 +61,7 @@ private:
 	void ClearPlaylistQueue();
 	bool PlayNext();
 	bool IsPlaying() const;
-	void RotationNiagaraSystem(float DeltaTime);
-	//bool HasInfiniteLifetimeEmitters(const UNiagaraComponent* NiagaraSystem)const;
+	void RotationNiagaraSystem(float DeltaTime)const ;
 
 private:
 	static constexpr int32 QueueCapacity = 64;
