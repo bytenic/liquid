@@ -11,8 +11,11 @@
 
 AEffectDisplayActor::AEffectDisplayActor()
 {
+	RotationRoot = CreateDefaultSubobject<USceneComponent>(TEXT("RotationRoot"));
+	//RotationRoot->SetupAttachment(RootComponent);
 	PlaylistArray.Reserve(QueueCapacity);
 	PrimaryActorTick.bCanEverTick = true;
+	
 }
 
 void AEffectDisplayActor::BeginPlay()
@@ -65,15 +68,14 @@ void AEffectDisplayActor::Tick(float DeltaTime)
 	{
 		return;
 	}
-	RotationNiagaraSystem(DeltaTime);
-
+	
 	if(!NiagaraComponent->IsActive())
 	{
 		StopCurrentPlayEffect();
 		PlayNext();
 		return;
 	}
-		
+	RotationNiagaraSystem(DeltaTime);
 
 	const auto NiagaraSystem = NiagaraComponent->GetAsset();
 	if(!NiagaraSystem)
@@ -108,11 +110,15 @@ void AEffectDisplayActor::OnNiagaraSystemFinished(UNiagaraComponent* InComp)
 
 void AEffectDisplayActor::StopCurrentPlayEffect()
 {
-	if(NiagaraComponent || !NiagaraComponent->IsActive())
+	if (NiagaraComponent && NiagaraComponent->IsActive())
 	{
 		NiagaraComponent->DeactivateImmediate();
 	}
-	NiagaraComponent = nullptr;
+	if (NiagaraComponent)
+	{
+		NiagaraComponent->DestroyComponent(); 
+		NiagaraComponent = nullptr;
+	}
 }
 
 void AEffectDisplayActor::ClearPlaylistQueue()
@@ -146,7 +152,8 @@ bool AEffectDisplayActor::PlayNext()
 		UE_LOG(LogTemp, Log,TEXT("AEffectDisplayActor Finish Play Effect"));
 		return false;
 	}
-	
+	NiagaraComponent->SetAutoDestroy(true);
+	NiagaraComponent->AttachToComponent(RotationRoot, FAttachmentTransformRules::KeepWorldTransform);
 	UE_LOG(LogTemp, Log,TEXT("AEffectDisplayActor Begin Play %s"),*PlaySystem->GetName());
 	return true;
 }
@@ -159,12 +166,12 @@ bool AEffectDisplayActor::IsPlaying() const
 		return false;
 	}
 		
-	return !NiagaraComponent->IsActive() || CurrentPlayIndex > 0;
+	return NiagaraComponent->IsActive() || CurrentPlayIndex > 0;
 }
 
 void AEffectDisplayActor::RotationNiagaraSystem(float DeltaTime)
 {
-	FRotator CurrentRotation = NiagaraComponent->GetRelativeRotation();
+	FRotator CurrentRotation = RotationRoot->GetRelativeRotation();
 	CurrentRotation.Yaw += RotateSpeed * DeltaTime;
-	NiagaraComponent->SetRelativeRotation(CurrentRotation);
+	RotationRoot->SetRelativeRotation(CurrentRotation);
 }

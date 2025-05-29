@@ -31,7 +31,10 @@ protected:
 	virtual void Tick(float DeltaTime)override;
 	UPROPERTY(EditAnywhere)
 	FVector EffectPlaceOffset{};
-	//private に移せるかも:
+
+	UPROPERTY()
+	TObjectPtr<USceneComponent> RotationRoot{};
+	
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite)
 	TObjectPtr<UNiagaraComponent> NiagaraComponent{};
 
