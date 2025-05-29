@@ -24,7 +24,7 @@ public:
 protected:
 	virtual void Tick(float DeltaTime)override;
 	UPROPERTY(EditAnywhere)
-	FVector EffectPlaceOffset{100.0,.0,100.0};
+	FVector EffectPlaceOffset{200.0,.0,100.0};
 
 	UPROPERTY()
 	TObjectPtr<USceneComponent> RotationRoot{};

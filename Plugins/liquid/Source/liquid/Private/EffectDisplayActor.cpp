@@ -57,7 +57,7 @@ void AEffectDisplayActor::BeginPlay()
 						+ GetActorRightVector() * EffectPlaceOffset.Y
 						+ GetActorUpVector() * EffectPlaceOffset.Z;
 	const FVector Location = GetActorLocation() + Offset;
-	RotationRoot->SetRelativeLocation(Location);
+	RotationRoot->SetWorldLocation(GetActorLocation() + Offset);
 	
 	if(LoadNiagaraSystems())
 	{
@@ -73,7 +73,6 @@ void AEffectDisplayActor::PlayEffect()
 	if(IsPlaying())
 	{
 		StopCurrentPlayEffect();
-		ClearPlaylistQueue();
 	}
 	CurrentPlayIndex = InvalidPlayIndex;
 	PlayNext();
@@ -98,7 +97,7 @@ void AEffectDisplayActor::Tick(float DeltaTime)
 	const auto NiagaraSystem = NiagaraComponent->GetAsset();
 	if(!NiagaraSystem)
 	{
-		UE_LOG(LogTemp, Log,TEXT("AEffectDisplayActor::Tick NiagaraSystem is nullptr"));
+		UE_LOG(LogTemp, VeryVerbose, TEXT("AEffectDisplayActor::Tick NiagaraSystem is nullptr"));
 		return;
 	}
 	const auto SystemInstanceController = NiagaraComponent->GetSystemInstanceController();
