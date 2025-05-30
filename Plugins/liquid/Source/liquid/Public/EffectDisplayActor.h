@@ -20,30 +20,24 @@ public:
 	virtual void BeginPlay() override;
 	UFUNCTION(BlueprintCallable)
 	void PlayEffect();
-	
 protected:
 	virtual void Tick(float DeltaTime)override;
-	UPROPERTY(EditAnywhere)
+protected:
+	UPROPERTY(EditAnywhere, meta=(Tooltip = "再生位置のオフセット"))
 	FVector EffectPlaceOffset{200.0,.0,100.0};
-
-	UPROPERTY()
-	TObjectPtr<USceneComponent> RotationRoot{};
 	
-	UPROPERTY(VisibleAnywhere, BlueprintReadWrite)
-	TObjectPtr<UNiagaraComponent> NiagaraComponent{};
-
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(EditAnywhere, meta=(Tooltip = "登録対象となるエフェクトのルートパス"))
 	FString NiagaraRootPath{};
 
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(EditAnywhere, meta=(Tooltip = "ゲーム再生時に自動で登録したエフェクトを再生する"))
 	bool IsAutoPlay{true};
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(EditAnywhere, meta=(Tooltip = "ループ再生を行うかどうか"))
 	bool IsLoop{true};
 
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(EditAnywhere, meta=(Tooltip = "一秒あたりの回転角度(度) ※NiagaraSystemのLocalSpaceをONにしないと回転しません"))
 	float RotateSpeed{.0f};
 	
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(EditAnywhere, meta=(Tooltip = "1つあたりのエフェクトの再生時間"))
 	float PlayInterval{5.0f};
 	
 private:
@@ -62,6 +56,11 @@ private:
 	static constexpr int32 InvalidPlayIndex = -1;
 
 	UPROPERTY()
-	TArray<TObjectPtr<UNiagaraSystem>> PlaylistArray{};
-	int32 CurrentPlayIndex{-1};
+	TObjectPtr<USceneComponent> RotationRoot{};	//NiagaraComponent自身を回転させてもSystemが回らなかったので親子関係で回転させる
+	
+	UPROPERTY()
+	TArray<TObjectPtr<UNiagaraSystem>> PlaylistArray{}; //再生するNiagaraSystemのコンテナ
+	UPROPERTY()
+	TObjectPtr<UNiagaraComponent> NiagaraComponent{}; //再生中のNiagara
+	int32 CurrentPlayIndex{-1}; //再生中のPlaylistArray Index
 };
