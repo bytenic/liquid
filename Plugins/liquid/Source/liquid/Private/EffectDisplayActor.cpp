@@ -13,39 +13,41 @@ AEffectDisplayActor::AEffectDisplayActor()
 	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 	RotationRoot = CreateDefaultSubobject<USceneComponent>(TEXT("RotationRoot"));
 	RotationRoot->SetupAttachment(RootComponent);
-	PlaylistArray.Reserve(QueueCapacity);
+	Playlist.Reserve(PlaylistReserveCapacity);
 	PrimaryActorTick.bCanEverTick = true;
 }
 
-bool AEffectDisplayActor::LoadNiagaraSystems()
+void AEffectDisplayActor::LoadAdditionalNiagaraSystems()
 {
+	if(AdditionalNiagaraFolderPath.IsEmpty())
+	{
+		return;
+	}
 	const FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
 	const IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
 
 	FARFilter Filter;
-	Filter.PackagePaths.Add(*NiagaraRootPath);
+	Filter.PackagePaths.Add(*AdditionalNiagaraFolderPath);
 	Filter.bRecursivePaths = true;
 	Filter.bIncludeOnlyOnDiskAssets = false;
 
 	// アセットの検索
 	TArray<FAssetData> NiagaraAssetArray{};
-	NiagaraAssetArray.Reserve(32);
+	NiagaraAssetArray.Reserve(PlaylistReserveCapacity);
 	AssetRegistry.GetAssets(Filter, NiagaraAssetArray);
 
 	if(NiagaraAssetArray.IsEmpty())
 	{
-		UE_LOG(LogTemp, Log,TEXT("not found niagara system in %s "), *NiagaraRootPath);
-		return false;
+		UE_LOG(LogTemp, Log,TEXT("not found niagara system in %s "), *AdditionalNiagaraFolderPath);
 	}
 	for(const auto& Asset : NiagaraAssetArray)
 	{
 		UNiagaraSystem* System = Cast<UNiagaraSystem>(Asset.GetAsset());
 		if(System)
 		{
-			PlaylistArray.Add(System);	
+			Playlist.Add(System);	
 		}
 	}
-	return true;
 }
 
 void AEffectDisplayActor::BeginPlay()
@@ -56,13 +58,11 @@ void AEffectDisplayActor::BeginPlay()
 						+ GetActorUpVector() * EffectPlaceOffset.Z;
 	const FVector Location = GetActorLocation() + Offset;
 	RotationRoot->SetWorldLocation(GetActorLocation() + Offset);
-	
-	if(LoadNiagaraSystems())
+
+	LoadAdditionalNiagaraSystems();
+	if(IsAutoPlay && !Playlist.IsEmpty())
 	{
-		if(IsAutoPlay)
-		{
-			PlayEffect();
-		}
+		PlayEffect();
 	}
 }
 
@@ -136,15 +136,10 @@ void AEffectDisplayActor::StopCurrentPlayEffect()
 	}
 }
 
-void AEffectDisplayActor::ClearPlaylistQueue()
-{
-	PlaylistArray.Empty();
-}
-
 bool AEffectDisplayActor::PlayNext()
 {
 	CurrentPlayIndex++;
-	if(CurrentPlayIndex >= PlaylistArray.Num())
+	if(CurrentPlayIndex >= Playlist.Num())
 	{
 		if(IsLoop)
 		{
@@ -157,7 +152,7 @@ bool AEffectDisplayActor::PlayNext()
 			return false;
 		}
 	}
-	UNiagaraSystem* PlaySystem = PlaylistArray[CurrentPlayIndex];
+	UNiagaraSystem* PlaySystem = Playlist[CurrentPlayIndex];
 	NiagaraComponent = UNiagaraFunctionLibrary::SpawnSystemAttached(
 		PlaySystem,
 		RotationRoot,
