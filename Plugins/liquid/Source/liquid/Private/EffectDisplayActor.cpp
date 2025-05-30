@@ -1,6 +1,5 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-
 #include "EffectDisplayActor.h"
 #include "NiagaraComponent.h"
 #include "NiagaraSystem.h"
@@ -16,7 +15,6 @@ AEffectDisplayActor::AEffectDisplayActor()
 	RotationRoot->SetupAttachment(RootComponent);
 	PlaylistArray.Reserve(QueueCapacity);
 	PrimaryActorTick.bCanEverTick = true;
-	
 }
 
 bool AEffectDisplayActor::LoadNiagaraSystems()
@@ -196,5 +194,3 @@ void AEffectDisplayActor::RotationNiagaraSystem(float DeltaTime)const
 	CurrentRotation.Yaw += RotateSpeed * DeltaTime;
 	RotationRoot->SetRelativeRotation(CurrentRotation);
 }
-
-
