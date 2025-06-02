@@ -24,23 +24,23 @@ struct FPostProcessConfig : public FTableRowBase
  * 
  */
 UCLASS(Config=Game)
-class LIQUID_API UPostProcessCallSubsystem : public UTickableWorldSubsystem
+class LIQUID_API UPostProcessCallSubsystem : public UWorldSubsystem
 {
 	GENERATED_BODY()
 public:
+	
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-	virtual void Tick(float DeltaTime) override;
-	virtual TStatId GetStatId() const override{RETURN_QUICK_DECLARE_CYCLE_STAT(UPostProcessCallSubsystem, STATGROUP_Tickables);}
-
+	virtual void Deinitialize() override;
+	
+	
 	UFUNCTION(BlueprintCallable,Category="PostProcess")
 	void PlayPostEffect(const FName EffectID);
 	void StopCurrentEffect();
-	
-	
-	
+
 private:
 	void BeginEffect(const FPostProcessConfig& Config);
 	void EndEffect();
+	void OnWorldPostActorTick(UWorld* InWorld, ELevelTick InType,float DeltaTime);
 
 	float ElapsedTime = .0f;
 	bool IsPlaying{false};
@@ -54,4 +54,5 @@ private:
 	FPostProcessSettings OverrideSettings;
 	FWeightedBlendable Blendable{};
 	
+	FDelegateHandle PostActorTickHandle;
 };
