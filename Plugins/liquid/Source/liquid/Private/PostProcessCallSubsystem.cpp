@@ -3,8 +3,56 @@
 
 #include "PostProcessCallSubsystem.h"
 
-#include "Camera/CameraComponent.h"
 #include "Kismet/GameplayStatics.h"
+
+FPostProcessOverrideTask::FPostProcessOverrideTask(FOverridePostProcessConfig* ConfigPtr, UPostProcessCallSubsystem* Owner)
+	: PostProcessConfig(ConfigPtr), Owner(Owner)
+{
+	
+}
+
+FString FPostProcessOverrideTask::GetReferencerName() const
+{
+	return TEXT("PostProcessOverrideTask");
+}
+
+void FPostProcessOverrideTask::AddReferencedObjects(FReferenceCollector& Collector)
+{
+	Collector.AddReferencedObject(MaterialInstanceDynamic);
+}
+
+bool FPostProcessOverrideTask::Activate()
+{
+	if(!PostProcessConfig->Material)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[FPostProcessOverrideTask] Material is nullptr "));
+		return false;
+	}
+	MaterialInstanceDynamic = UMaterialInstanceDynamic::Create(PostProcessConfig->Material,Owner);
+	FWeightedBlendable Blendable;
+	Blendable.Object = MaterialInstanceDynamic;
+	Blendable.Weight = 1.0f;
+	OverrideSettings.WeightedBlendables.Array.Add(Blendable);
+	return true;
+}
+
+PostProcessTaskTickResult FPostProcessOverrideTask::Tick(APlayerCameraManager* CameraManager, float DeltaTime)
+{
+	CameraManager->AddCachedPPBlend(OverrideSettings, 1.f, VTBlendOrder_Override);
+
+	for (const auto& Parameters : PostProcessConfig->ControlParameters)
+	{
+		if (Parameters.MaterialParameterName ==  NAME_None)
+		{
+			continue;
+		}
+		const float Value = Parameters.FloatCurve->GetFloatValue(ElapsedTime);
+		MaterialInstanceDynamic->SetScalarParameterValue(Parameters.MaterialParameterName, Value);
+	}
+	
+	ElapsedTime += DeltaTime;
+	return ElapsedTime >= PostProcessConfig->Duration ? PostProcessTaskTickResult::Finish : PostProcessTaskTickResult::Progress;
+}
 
 void UPostProcessCallSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -64,7 +112,7 @@ void UPostProcessCallSubsystem::BeginEffect(const FOverridePostProcessConfig& Co
 		return;
 	}
 	CurrentPlayMID = UMaterialInstanceDynamic::Create(Mat,this);
-
+	FWeightedBlendable Blendable;
 	Blendable.Object = CurrentPlayMID;
 	Blendable.Weight = 1.0f;
 	OverrideSettings.WeightedBlendables.Array.Add(Blendable);

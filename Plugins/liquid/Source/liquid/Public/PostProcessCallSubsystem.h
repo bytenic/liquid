@@ -22,8 +22,7 @@ struct FPostprocessControlParameters
 USTRUCT(BlueprintType)
 struct FOverridePostProcessConfig : public FTableRowBase
 {
-	GENERATED_BODY()
-	
+	GENERATED_BODY()	
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	TObjectPtr<UMaterialInstance> Material{nullptr}; //TSoftObjectPtrの方がいいかも
 
@@ -35,6 +34,35 @@ struct FOverridePostProcessConfig : public FTableRowBase
 	
 	UPROPERTY(EditAnywhere, BlueprintReadOnly,meta=(ToolTip="操作するマテリアルパラメータ"))
 	TArray<FPostprocessControlParameters> ControlParameters;
+};
+
+enum class PostProcessTaskTickResult : uint8
+{
+	Progress,
+	Finish,
+	Failed,
+};
+
+class FPostProcessOverrideTask : FGCObject
+{
+
+public:
+	explicit FPostProcessOverrideTask(FOverridePostProcessConfig* ConfigPtr, UPostProcessCallSubsystem* Owner);
+
+	virtual FString GetReferencerName() const override;
+	virtual void AddReferencedObjects(FReferenceCollector& Collector) override;
+
+	bool Activate();
+	PostProcessTaskTickResult Tick(APlayerCameraManager* CameraManager, float DeltaTime);
+
+	
+private:
+	FOverridePostProcessConfig* PostProcessConfig{nullptr};
+	TObjectPtr<UPostProcessCallSubsystem> Owner{};
+	TObjectPtr<UMaterialInstanceDynamic> MaterialInstanceDynamic{nullptr};
+	FPostProcessSettings OverrideSettings{};
+	float ElapsedTime = .0f;
+	
 };
 
 /**
@@ -69,7 +97,6 @@ private:
 	UPROPERTY()
 	TObjectPtr<UDataTable> PostProcessTable{nullptr};
 	FPostProcessSettings OverrideSettings;
-	FWeightedBlendable Blendable{};
 
 	static constexpr TCHAR TableAssetPath[] = TEXT("/liquid/post_process/sample_table");
 	FDelegateHandle PostActorTickHandle;
