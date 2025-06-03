@@ -9,15 +9,32 @@
 #include "PostProcessCallSubsystem.generated.h"
 
 USTRUCT(BlueprintType)
-struct FPostProcessConfig : public FTableRowBase
+struct FPostprocessControlParameters
 {
 	GENERATED_BODY()
 	
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(EditAnywhere,meta=(ToolTip="操作するマテリアルパラメータ名"))
+	FName MaterialParameterName = NAME_None;
+	UPROPERTY(EditAnywhere,meta=(ToolTip="パラメータを操作するFloatカーブアセット"))
+	TObjectPtr<UCurveFloat> FloatCurve{};
+};
+
+USTRUCT(BlueprintType)
+struct FOverridePostProcessConfig : public FTableRowBase
+{
+	GENERATED_BODY()
+	
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	TObjectPtr<UMaterialInstance> Material{nullptr}; //TSoftObjectPtrの方がいいかも
 
-	UPROPERTY(EditAnywhere)
-	float Duration = 1.0f;
+	UPROPERTY(EditAnywhere,BlueprintReadOnly, meta=(ToolTip="このポストプロセスのアルファ値(0で何もしない、1で完全適用)"))
+	float Weight = 1.0f;
+	
+	UPROPERTY(EditAnywhere,BlueprintReadOnly, meta=(ToolTip="適用する時間"))
+	float Duration = 2.0f;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadOnly,meta=(ToolTip="操作するマテリアルパラメータ"))
+	TArray<FPostprocessControlParameters> ControlParameters;
 };
 
 /**
@@ -38,14 +55,14 @@ public:
 	void StopCurrentEffect();
 
 private:
-	void BeginEffect(const FPostProcessConfig& Config);
+	void BeginEffect(const FOverridePostProcessConfig& Config);
 	void EndEffect();
 	void OnWorldPostActorTick(UWorld* InWorld, ELevelTick InType,float DeltaTime);
 
 	float ElapsedTime = .0f;
 	bool IsPlaying{false};
 
-	FPostProcessConfig CurrentSettings{};
+	FOverridePostProcessConfig CurrentSettings{};
 
 	UPROPERTY()
 	TObjectPtr<UMaterialInstanceDynamic> CurrentPlayMID = nullptr;
@@ -53,6 +70,7 @@ private:
 	TObjectPtr<UDataTable> PostProcessTable{nullptr};
 	FPostProcessSettings OverrideSettings;
 	FWeightedBlendable Blendable{};
-	
+
+	static constexpr TCHAR TableAssetPath[] = TEXT("/liquid/post_process/sample_table");
 	FDelegateHandle PostActorTickHandle;
 };

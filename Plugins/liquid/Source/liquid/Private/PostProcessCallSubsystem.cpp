@@ -6,11 +6,10 @@
 #include "Camera/CameraComponent.h"
 #include "Kismet/GameplayStatics.h"
 
-static constexpr TCHAR PostProcessTableAssetPath[] = TEXT("/liquid/post_process/sample_table");
 void UPostProcessCallSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
-	PostProcessTable = Cast<UDataTable>(StaticLoadObject(UDataTable::StaticClass(), nullptr, PostProcessTableAssetPath));
+	PostProcessTable = Cast<UDataTable>(StaticLoadObject(UDataTable::StaticClass(), nullptr, TableAssetPath));
 	
 	if(!PostProcessTable)
 	{
@@ -31,7 +30,7 @@ void UPostProcessCallSubsystem::PlayPostEffect(const FName EffectID)
 	{
 		return;
 	}
-	if(const FPostProcessConfig* Row = PostProcessTable->FindRow<FPostProcessConfig>(EffectID, TEXT("PostProcessCallSubsystem")))
+	if(const FOverridePostProcessConfig* Row = PostProcessTable->FindRow<FOverridePostProcessConfig>(EffectID, TEXT("PostProcessCallSubsystem")))
 	{
 		BeginEffect(*Row);
 	}
@@ -49,7 +48,7 @@ void UPostProcessCallSubsystem::StopCurrentEffect()
 	}
 }
 
-void UPostProcessCallSubsystem::BeginEffect(const FPostProcessConfig& Config)
+void UPostProcessCallSubsystem::BeginEffect(const FOverridePostProcessConfig& Config)
 {
 	EndEffect();
 
@@ -68,7 +67,6 @@ void UPostProcessCallSubsystem::BeginEffect(const FPostProcessConfig& Config)
 
 	Blendable.Object = CurrentPlayMID;
 	Blendable.Weight = 1.0f;
-	//Blendable.
 	OverrideSettings.WeightedBlendables.Array.Add(Blendable);
 }
 
@@ -91,23 +89,17 @@ void UPostProcessCallSubsystem::OnWorldPostActorTick(UWorld* InWorld, ELevelTick
 	UWorld* CurrentWorld = GetWorld();
 	if(!CurrentWorld)
 		return;
-	
-	//UE_LOG(LogTemp, Warning, TEXT("CachedPPBlends: %d"));
-
 	ElapsedTime += DeltaTime;
-	const float Duration = FMath::Max(CurrentSettings.Duration, KINDA_SMALL_NUMBER);
-
-	float Alpha = FMath::Clamp(ElapsedTime / Duration, .0f, 1.0f);
-	float Value = .0f;
-	
-	Value = (Alpha < .5f) ? Alpha * 2.0f : (1.0 - Alpha) * 2.0f; //三角
+	if (CurrentPlayMID)
+	{
+		for (const auto& ParameterSet : CurrentSettings.ControlParameters)
+		{
+			if (ParameterSet.MaterialParameterName == NAME_None)
+				continue;
+			const float Value = ParameterSet.FloatCurve->GetFloatValue(ElapsedTime);
+			CurrentPlayMID->SetScalarParameterValue(ParameterSet.MaterialParameterName, Value);
+		}
+	}
 	auto PCM = UGameplayStatics::GetPlayerCameraManager(CurrentWorld,0);
 	PCM->AddCachedPPBlend(OverrideSettings, 1.f, VTBlendOrder_Override);
-	//PCM->
-	//if(CurrentPlayMID && CurrentSettings.ParameterName != NAME_None)
-	//{
-	//	CurrentPlayMID->SetScalarParameterValue()
-	//}
-
-	//CurrentWorld->GetWorldSettings()->SetOverridePostProcessSettings(OverrideSettings, 1.0f);
 }
