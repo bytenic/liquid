@@ -88,3 +88,4 @@ DerivedDataCache/*
 /polar_space_output.tga
 /StandardDistortion.hlsl
 /*.vsconfig
+/ROM
