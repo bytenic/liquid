@@ -50,6 +50,7 @@ void AEffectDisplayActor::LoadAdditionalNiagaraSystems()
 	}
 }
 
+
 void AEffectDisplayActor::BeginPlay()
 {
 	Super::BeginPlay();
@@ -59,6 +60,11 @@ void AEffectDisplayActor::BeginPlay()
 	const FVector Location = GetActorLocation() + Offset;
 	RotationRoot->SetWorldLocation(GetActorLocation() + Offset);
 
+	//初期値が無効になっているものがあれば取り除く
+	Playlist.RemoveAll([](const TObjectPtr<UNiagaraSystem>& System)
+	{
+		return !IsValid(System);
+	});
 	LoadAdditionalNiagaraSystems();
 	if(IsAutoPlay && !Playlist.IsEmpty())
 	{
