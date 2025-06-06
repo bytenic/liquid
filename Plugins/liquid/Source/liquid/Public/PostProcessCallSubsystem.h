@@ -80,6 +80,9 @@ public:
 	PostProcessTaskTickResult Tick(APlayerCameraManager* CameraManager, float DeltaTime);
 
 private:
+	bool CreateMaterialInstanceDynamic();
+	
+private:
 	//memo: このふたつのポインタはUPostProcessCallSubsystemよりもこのクラスのライフサイクルが短いことと、DatatableをUPROPERTYで保持しているため生ポインタで保持している
 	const FOverridePostProcessConfig* PostProcessConfig{nullptr};
 	UPostProcessCallSubsystem* Owner{};

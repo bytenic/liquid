@@ -22,12 +22,10 @@ void FPostProcessOverrideTask::AddReferencedObjects(FReferenceCollector& Collect
 
 bool FPostProcessOverrideTask::Activate()
 {
-	if(!PostProcessConfig->Material)
+	if (!CreateMaterialInstanceDynamic())
 	{
-		UE_LOG(LogTemp, Error, TEXT("[FPostProcessOverrideTask] Material is nullptr "));
 		return false;
 	}
-	MaterialInstanceDynamic = UMaterialInstanceDynamic::Create(PostProcessConfig->Material,Owner);
 	FWeightedBlendable Blendable;
 	Blendable.Object = MaterialInstanceDynamic;
 	Blendable.Weight = 1.0f;
@@ -37,11 +35,15 @@ bool FPostProcessOverrideTask::Activate()
 
 bool FPostProcessOverrideTask::Activate(const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction)
 {
-	if (!Activate())
+	if (!CreateMaterialInstanceDynamic())
 	{
 		return false;
 	}
 	InitFunction(MaterialInstanceDynamic);
+	FWeightedBlendable Blendable;
+	Blendable.Object = MaterialInstanceDynamic;
+	Blendable.Weight = 1.0f;
+	OverrideSettings.WeightedBlendables.Array.Add(Blendable);
 	return true;
 }
 
@@ -70,6 +72,17 @@ PostProcessTaskTickResult FPostProcessOverrideTask::Tick(APlayerCameraManager* C
 
 	ElapsedTime += DeltaTime;
 	return ElapsedTime >= PostProcessConfig->Duration ? PostProcessTaskTickResult::Finish : PostProcessTaskTickResult::Progress;
+}
+
+bool FPostProcessOverrideTask::CreateMaterialInstanceDynamic()
+{
+	if(!PostProcessConfig->Material)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[FPostProcessOverrideTask] Material is nullptr "));
+		return false;
+	}
+	MaterialInstanceDynamic = UMaterialInstanceDynamic::Create(PostProcessConfig->Material,Owner);
+	return true;
 }
 
 /**
