@@ -26,10 +26,7 @@ bool FPostProcessOverrideTask::Activate()
 	{
 		return false;
 	}
-	FWeightedBlendable Blendable;
-	Blendable.Object = MaterialInstanceDynamic;
-	Blendable.Weight = 1.0f;
-	OverrideSettings.WeightedBlendables.Array.Add(Blendable);
+	InitializeOverrideSettings();
 	return true;
 }
 
@@ -40,10 +37,7 @@ bool FPostProcessOverrideTask::Activate(const TFunctionRef<void(UMaterialInstanc
 		return false;
 	}
 	InitFunction(MaterialInstanceDynamic);
-	FWeightedBlendable Blendable;
-	Blendable.Object = MaterialInstanceDynamic;
-	Blendable.Weight = 1.0f;
-	OverrideSettings.WeightedBlendables.Array.Add(Blendable);
+	InitializeOverrideSettings();
 	return true;
 }
 
@@ -83,6 +77,14 @@ bool FPostProcessOverrideTask::CreateMaterialInstanceDynamic()
 	}
 	MaterialInstanceDynamic = UMaterialInstanceDynamic::Create(PostProcessConfig->Material,Owner);
 	return true;
+}
+
+void FPostProcessOverrideTask::InitializeOverrideSettings()
+{
+	FWeightedBlendable Blendable;
+	Blendable.Object = MaterialInstanceDynamic;
+	Blendable.Weight = 1.0f;
+	OverrideSettings.WeightedBlendables.Array.Add(Blendable);
 }
 
 /**

@@ -81,7 +81,7 @@ public:
 
 private:
 	bool CreateMaterialInstanceDynamic();
-	
+	void InitializeOverrideSettings();
 private:
 	//memo: このふたつのポインタはUPostProcessCallSubsystemよりもこのクラスのライフサイクルが短いことと、DatatableをUPROPERTYで保持しているため生ポインタで保持している
 	const FOverridePostProcessConfig* PostProcessConfig{nullptr};
