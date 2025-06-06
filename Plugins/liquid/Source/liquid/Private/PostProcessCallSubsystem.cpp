@@ -2,10 +2,9 @@
 
 
 #include "PostProcessCallSubsystem.h"
-
 #include "Kismet/GameplayStatics.h"
 
-FPostProcessOverrideTask::FPostProcessOverrideTask(FOverridePostProcessConfig* ConfigPtr, UPostProcessCallSubsystem* Owner)
+FPostProcessOverrideTask::FPostProcessOverrideTask(const FOverridePostProcessConfig* ConfigPtr, UPostProcessCallSubsystem* Owner)
 	: PostProcessConfig(ConfigPtr), Owner(Owner)
 {
 	
@@ -49,7 +48,8 @@ PostProcessTaskTickResult FPostProcessOverrideTask::Tick(APlayerCameraManager* C
 		const float Value = Parameters.FloatCurve->GetFloatValue(ElapsedTime);
 		MaterialInstanceDynamic->SetScalarParameterValue(Parameters.MaterialParameterName, Value);
 	}
-	
+	CameraManager->AddCachedPPBlend(OverrideSettings, PostProcessConfig->Weight, VTBlendOrder_Override);
+
 	ElapsedTime += DeltaTime;
 	return ElapsedTime >= PostProcessConfig->Duration ? PostProcessTaskTickResult::Finish : PostProcessTaskTickResult::Progress;
 }
@@ -80,7 +80,7 @@ void UPostProcessCallSubsystem::PlayPostEffect(const FName EffectID)
 	}
 	if(const FOverridePostProcessConfig* Row = PostProcessTable->FindRow<FOverridePostProcessConfig>(EffectID, TEXT("PostProcessCallSubsystem")))
 	{
-		BeginEffect(*Row);
+		BeginEffect(Row);
 	}
 	else
 	{
@@ -88,66 +88,37 @@ void UPostProcessCallSubsystem::PlayPostEffect(const FName EffectID)
 	}
 }
 
-void UPostProcessCallSubsystem::StopCurrentEffect()
+void UPostProcessCallSubsystem::BeginEffect(const FOverridePostProcessConfig* Config)
 {
-	if(IsPlaying)
+	auto InitTask =	MakeUnique<FPostProcessOverrideTask>(Config, this);
+	if (InitTask->Activate())
 	{
-		EndEffect();
+		OverrideTasks.Emplace(MoveTemp(InitTask));
 	}
-}
-
-void UPostProcessCallSubsystem::BeginEffect(const FOverridePostProcessConfig& Config)
-{
-	EndEffect();
-
-	CurrentSettings = Config;
-	ElapsedTime = .0f;
-	IsPlaying = true;
-
-	UMaterialInstance* Mat = Config.Material;
-	if(!Mat)
-	{
-		UE_LOG(LogTemp, Error, TEXT("[UPostProcessCallSubsystem] Material is nullptr "));
-		IsPlaying = false;
-		return;
-	}
-	CurrentPlayMID = UMaterialInstanceDynamic::Create(Mat,this);
-	FWeightedBlendable Blendable;
-	Blendable.Object = CurrentPlayMID;
-	Blendable.Weight = 1.0f;
-	OverrideSettings.WeightedBlendables.Array.Add(Blendable);
-}
-
-void UPostProcessCallSubsystem::EndEffect()
-{
-	if(!IsPlaying)
-	{
-		return;
-	}
-	OverrideSettings.WeightedBlendables.Array.Reset();
-	CurrentPlayMID = nullptr;
-	IsPlaying = false;
-	auto PCM = UGameplayStatics::GetPlayerCameraManager(GetWorld(),0);
 }
 
 void UPostProcessCallSubsystem::OnWorldPostActorTick(UWorld* InWorld, ELevelTick InType, float DeltaTime)
 {
-	if(!IsPlaying)
-		return;
 	UWorld* CurrentWorld = GetWorld();
 	if(!CurrentWorld)
 		return;
-	ElapsedTime += DeltaTime;
-	if (CurrentPlayMID)
+	auto PCM = UGameplayStatics::GetPlayerCameraManager(CurrentWorld,0);
+
+	TArray<int32,TInlineAllocator<16>> DeleteIndexArray{};
+	const int32 NumTask = OverrideTasks.Num();
+	if (NumTask)
 	{
-		for (const auto& ParameterSet : CurrentSettings.ControlParameters)
+		UE_LOG(LogTemp, Warning, TEXT("[UPostProcessCallSubsystem] Override Postprocess Task Size is Over Delete Index Array NumTask: %d"), NumTask);	
+	}
+	for (int32 Index = 0 ; Index < NumTask ; Index++)
+	{
+		if (OverrideTasks[Index]->Tick(PCM, DeltaTime) == PostProcessTaskTickResult::Finish)
 		{
-			if (ParameterSet.MaterialParameterName == NAME_None)
-				continue;
-			const float Value = ParameterSet.FloatCurve->GetFloatValue(ElapsedTime);
-			CurrentPlayMID->SetScalarParameterValue(ParameterSet.MaterialParameterName, Value);
+			DeleteIndexArray.Add(Index);
 		}
 	}
-	auto PCM = UGameplayStatics::GetPlayerCameraManager(CurrentWorld,0);
-	PCM->AddCachedPPBlend(OverrideSettings, 1.f, VTBlendOrder_Override);
+	for (const auto Index : DeleteIndexArray)
+	{
+		OverrideTasks.RemoveAt(Index);
+	}
 }

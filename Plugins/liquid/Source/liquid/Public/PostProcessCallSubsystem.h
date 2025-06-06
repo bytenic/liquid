@@ -45,24 +45,24 @@ enum class PostProcessTaskTickResult : uint8
 
 class FPostProcessOverrideTask : FGCObject
 {
-
 public:
-	explicit FPostProcessOverrideTask(FOverridePostProcessConfig* ConfigPtr, UPostProcessCallSubsystem* Owner);
+	explicit FPostProcessOverrideTask(const FOverridePostProcessConfig* ConfigPtr, UPostProcessCallSubsystem* Owner);
 
 	virtual FString GetReferencerName() const override;
 	virtual void AddReferencedObjects(FReferenceCollector& Collector) override;
-
+	
 	bool Activate();
 	PostProcessTaskTickResult Tick(APlayerCameraManager* CameraManager, float DeltaTime);
 
-	
 private:
-	FOverridePostProcessConfig* PostProcessConfig{nullptr};
-	TObjectPtr<UPostProcessCallSubsystem> Owner{};
+	//memo: このふたつのポインタはUPostProcessCallSubsystemよりもこのクラスのライフサイクルが短いことと、DatatableをUPROPERTYで保持しているため生ポインタで保持している
+	const FOverridePostProcessConfig* PostProcessConfig{nullptr};
+	UPostProcessCallSubsystem* Owner{};
+
+	//memo: このオブジェクトをGCオブジェクトとして保護
 	TObjectPtr<UMaterialInstanceDynamic> MaterialInstanceDynamic{nullptr};
 	FPostProcessSettings OverrideSettings{};
 	float ElapsedTime = .0f;
-	
 };
 
 /**
@@ -80,24 +80,16 @@ public:
 	
 	UFUNCTION(BlueprintCallable,Category="PostProcess")
 	void PlayPostEffect(const FName EffectID);
-	void StopCurrentEffect();
 
 private:
-	void BeginEffect(const FOverridePostProcessConfig& Config);
-	void EndEffect();
+	void BeginEffect(const FOverridePostProcessConfig* Config);
 	void OnWorldPostActorTick(UWorld* InWorld, ELevelTick InType,float DeltaTime);
-
-	float ElapsedTime = .0f;
-	bool IsPlaying{false};
-
-	FOverridePostProcessConfig CurrentSettings{};
-
-	UPROPERTY()
-	TObjectPtr<UMaterialInstanceDynamic> CurrentPlayMID = nullptr;
+	
 	UPROPERTY()
 	TObjectPtr<UDataTable> PostProcessTable{nullptr};
-	FPostProcessSettings OverrideSettings;
-
-	static constexpr TCHAR TableAssetPath[] = TEXT("/liquid/post_process/sample_table");
+	
+	TArray<TUniquePtr<FPostProcessOverrideTask>> OverrideTasks;
 	FDelegateHandle PostActorTickHandle;
+	
+	static constexpr TCHAR TableAssetPath[] = TEXT("/liquid/post_process/sample_table");
 };
