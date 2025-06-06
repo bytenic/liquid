@@ -72,6 +72,16 @@ public:
 	virtual void AddReferencedObjects(FReferenceCollector& Collector) override;
 	/** タスクを初期化・有効化 */
 	bool Activate();
+	template<typename InitPred>
+	bool Activate(InitPred&& Init)
+	{
+		if (!Activate())
+		{
+			return false;
+		}
+		Init(MaterialInstanceDynamic);
+		return true;
+	}
 	/**
 	 * タスクの更新処理
 	 * @param CameraManager カメラマネージャへの参照
@@ -109,9 +119,32 @@ public:
 	UFUNCTION(BlueprintCallable,Category="PostProcess", meta=(ToolTip="データテーブル上のIDに基づいてポストエフェクトを呼び出します"))
 	void PlayPostEffect(const FName EffectID);
 
+	template<typename InitPred>
+	void PlayPostEffect(const FName EffectID, InitPred&& Pred)
+	{
+		if(!PostProcessTable)
+		{
+			return;
+		}
+		if(const FOverridePostProcessConfig* Row = PostProcessTable->FindRow<FOverridePostProcessConfig>(EffectID, TEXT("PostProcessCallSubsystem")))
+		{
+			BeginEffect(Row, Forward<InitPred>(Pred));
+		}
+	}
+	
 private:
 	/** エフェクトの適用開始 */
 	void BeginEffect(const FOverridePostProcessConfig* Config);
+	template<typename InitPred>
+	void BeginEffect(const FOverridePostProcessConfig* Config, InitPred&& Init)
+	{
+		auto InitTask =	MakeUnique<FPostProcessOverrideTask>(Config, this);
+		if (InitTask->Activate(Forward<InitPred>(Init)))
+		{
+			OverrideTasks.Emplace(MoveTemp(InitTask));
+		}
+	}
+	
 	/** WorldのPostTick時に呼び出されるタスク更新関数 */
 	void OnWorldPostActorTick(UWorld* InWorld, ELevelTick InType,float DeltaTime);
 	/** ポストプロセス設定を格納したデータテーブル ※アセットのパスはTableAssetPathでハードコーディングされています*/
