@@ -8,6 +8,9 @@
 #include "Engine/Scene.h"
 #include "PostProcessCallSubsystem.generated.h"
 
+/**
+ * PostprocessMaterialの（float）パラメータをカーブで制御するための構造体
+ */
 USTRUCT(BlueprintType)
 struct FPostprocessControlParameters
 {
@@ -19,12 +22,16 @@ struct FPostprocessControlParameters
 	TObjectPtr<UCurveFloat> FloatCurve{};
 };
 
+
+/**
+ * データテーブル(UPostProcessCallSubsystem::PostProcessTable)で定義されるポストプロセスエフェクト構成情報
+ */
 USTRUCT(BlueprintType)
 struct FOverridePostProcessConfig : public FTableRowBase
 {
 	GENERATED_BODY()	
-	UPROPERTY(EditAnywhere, BlueprintReadOnly)
-	TObjectPtr<UMaterialInstance> Material{nullptr}; //TSoftObjectPtrの方がいいかも
+	UPROPERTY(EditAnywhere, BlueprintReadOnly,meta=(ToolTip="適用するMaterial ※PostProcessMaterial以外を設定しないこと"))
+	TObjectPtr<UMaterialInstance> Material{nullptr}; //memo: ハードリファレンスになると初期化時にすべてLoadされるためTSoftObjectPtrの方がいいかも
 
 	UPROPERTY(EditAnywhere,BlueprintReadOnly, meta=(ToolTip="このポストプロセスのアルファ値(0で何もしない、1で完全適用)"))
 	float Weight = 1.0f;
@@ -36,22 +43,40 @@ struct FOverridePostProcessConfig : public FTableRowBase
 	TArray<FPostprocessControlParameters> ControlParameters;
 };
 
+/**
+ * ポストプロセス実行タスクの進行状態
+ */
 enum class PostProcessTaskTickResult : uint8
 {
 	Progress,
 	Finish,
-	Failed,
+	Failed, //現在未使用
 };
 
+/**
+ * 単一のポストプロセスエフェクトを実行・制御するタスク
+ */
 class FPostProcessOverrideTask : FGCObject
 {
 public:
-	explicit FPostProcessOverrideTask(const FOverridePostProcessConfig* ConfigPtr, UPostProcessCallSubsystem* Owner);
 
+	/**
+	 * コンストラクタ
+	 * @param ConfigPtr 使用する構成情報
+	 * @param Owner 所有者（Subsystem）
+	 */	
+	explicit FPostProcessOverrideTask(const FOverridePostProcessConfig* ConfigPtr, UPostProcessCallSubsystem* Owner);
+	/** GC参照の識別子名 */
 	virtual FString GetReferencerName() const override;
+	/** GC参照対象を追加 */
 	virtual void AddReferencedObjects(FReferenceCollector& Collector) override;
-	
+	/** タスクを初期化・有効化 */
 	bool Activate();
+	/**
+	 * タスクの更新処理
+	 * @param CameraManager カメラマネージャへの参照
+	 * @param DeltaTime 経過時間
+	 */	
 	PostProcessTaskTickResult Tick(APlayerCameraManager* CameraManager, float DeltaTime);
 
 private:
@@ -66,7 +91,7 @@ private:
 };
 
 /**
- * 
+ * データテーブルに基づいてポストプロセスエフェクトを適用するWorld Subsystem
  */
 UCLASS(Config=Game)
 class LIQUID_API UPostProcessCallSubsystem : public UWorldSubsystem
@@ -76,15 +101,20 @@ public:
 	
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
-	
-	
-	UFUNCTION(BlueprintCallable,Category="PostProcess")
+
+	/**
+	 * データテーブル上のIDに基づいてポストエフェクトを実行
+	 * @param EffectID データテーブル内の行ID
+	 */	
+	UFUNCTION(BlueprintCallable,Category="PostProcess", meta=(ToolTip="データテーブル上のIDに基づいてポストエフェクトを呼び出します"))
 	void PlayPostEffect(const FName EffectID);
 
 private:
+	/** エフェクトの適用開始 */
 	void BeginEffect(const FOverridePostProcessConfig* Config);
+	/** WorldのPostTick時に呼び出されるタスク更新関数 */
 	void OnWorldPostActorTick(UWorld* InWorld, ELevelTick InType,float DeltaTime);
-	
+	/** ポストプロセス設定を格納したデータテーブル ※アセットのパスはTableAssetPathでハードコーディングされています*/
 	UPROPERTY()
 	TObjectPtr<UDataTable> PostProcessTable{nullptr};
 	

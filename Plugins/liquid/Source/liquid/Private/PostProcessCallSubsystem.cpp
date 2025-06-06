@@ -35,6 +35,14 @@ bool FPostProcessOverrideTask::Activate()
 	return true;
 }
 
+/**
+ * カメラマネージャに対してポストプロセス設定を適用。
+ * マテリアルパラメータをカーブに基づいて更新し、経過時間を考慮して進行状況を返す。
+ *
+ * @param CameraManager 対象のプレイヤーカメラマネージャ
+ * @param DeltaTime 経過時間（秒）
+ * @return タスクの進行状態
+ */
 PostProcessTaskTickResult FPostProcessOverrideTask::Tick(APlayerCameraManager* CameraManager, float DeltaTime)
 {
 	CameraManager->AddCachedPPBlend(OverrideSettings, 1.f, VTBlendOrder_Override);
@@ -54,6 +62,10 @@ PostProcessTaskTickResult FPostProcessOverrideTask::Tick(APlayerCameraManager* C
 	return ElapsedTime >= PostProcessConfig->Duration ? PostProcessTaskTickResult::Finish : PostProcessTaskTickResult::Progress;
 }
 
+/**
+ * サブシステムの初期化処理。
+ * データテーブルを読み込み、WorldPostActorTick に登録。
+ */
 void UPostProcessCallSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
@@ -67,11 +79,19 @@ void UPostProcessCallSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		this, &UPostProcessCallSubsystem::OnWorldPostActorTick);
 }
 
+/**
+ * サブシステムの終了処理。デリゲート登録を解除。
+ */
 void UPostProcessCallSubsystem::Deinitialize()
 {
 	FWorldDelegates::OnWorldPostActorTick.Remove(PostActorTickHandle);
 }
 
+/**
+ * データテーブルから指定IDの行を取得し、該当するエフェクトを実行
+ *
+ * @param EffectID データテーブル内の行ID
+ */
 void UPostProcessCallSubsystem::PlayPostEffect(const FName EffectID)
 {
 	if(!PostProcessTable)
@@ -88,6 +108,11 @@ void UPostProcessCallSubsystem::PlayPostEffect(const FName EffectID)
 	}
 }
 
+/**
+ * タスクを初期化・有効化し、実行中タスクリストに追加
+ *
+ * @param Config 実行するエフェクトの設定情報
+ */
 void UPostProcessCallSubsystem::BeginEffect(const FOverridePostProcessConfig* Config)
 {
 	auto InitTask =	MakeUnique<FPostProcessOverrideTask>(Config, this);
@@ -97,6 +122,14 @@ void UPostProcessCallSubsystem::BeginEffect(const FOverridePostProcessConfig* Co
 	}
 }
 
+/**
+ * WorldのPostActorTickイベントで呼び出される。全てのタスクを更新。
+ * 終了済みのタスクは削除。
+ *
+ * @param InWorld World参照
+ * @param InType Tickタイプ
+ * @param DeltaTime 経過時間
+ */
 void UPostProcessCallSubsystem::OnWorldPostActorTick(UWorld* InWorld, ELevelTick InType, float DeltaTime)
 {
 	UWorld* CurrentWorld = GetWorld();
