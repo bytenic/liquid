@@ -35,6 +35,16 @@ bool FPostProcessOverrideTask::Activate()
 	return true;
 }
 
+bool FPostProcessOverrideTask::Activate(const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction)
+{
+	if (!Activate())
+	{
+		return false;
+	}
+	InitFunction(MaterialInstanceDynamic);
+	return true;
+}
+
 /**
  * カメラマネージャに対してポストプロセス設定を適用。
  * マテリアルパラメータをカーブに基づいて更新し、経過時間を考慮して進行状況を返す。
@@ -108,6 +118,19 @@ void UPostProcessCallSubsystem::PlayPostEffect(const FName EffectID)
 	}
 }
 
+void UPostProcessCallSubsystem::PlayPostEffect(const FName EffectID,
+	const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction)
+{
+	if(!PostProcessTable)
+	{
+		return;
+	}
+	if(const FOverridePostProcessConfig* Row = PostProcessTable->FindRow<FOverridePostProcessConfig>(EffectID, TEXT("PostProcessCallSubsystem")))
+	{
+		BeginEffect(Row, InitFunction);
+	}
+}
+
 /**
  * タスクを初期化・有効化し、実行中タスクリストに追加
  *
@@ -117,6 +140,16 @@ void UPostProcessCallSubsystem::BeginEffect(const FOverridePostProcessConfig* Co
 {
 	auto InitTask =	MakeUnique<FPostProcessOverrideTask>(Config, this);
 	if (InitTask->Activate())
+	{
+		OverrideTasks.Emplace(MoveTemp(InitTask));
+	}
+}
+
+void UPostProcessCallSubsystem::BeginEffect(const FOverridePostProcessConfig* Config,
+	const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction)
+{
+	auto InitTask =	MakeUnique<FPostProcessOverrideTask>(Config, this);
+	if (InitTask->Activate(InitFunction))
 	{
 		OverrideTasks.Emplace(MoveTemp(InitTask));
 	}
