@@ -51,16 +51,17 @@ bool FPostProcessOverrideTask::Activate(const TFunctionRef<void(UMaterialInstanc
  */
 PostProcessTaskTickResult FPostProcessOverrideTask::Tick(APlayerCameraManager* CameraManager, float DeltaTime)
 {
-	CameraManager->AddCachedPPBlend(OverrideSettings, 1.f, VTBlendOrder_Override);
-
 	for (const auto& Parameters : PostProcessConfig->ControlParameters)
 	{
 		if (Parameters.MaterialParameterName ==  NAME_None)
 		{
 			continue;
 		}
-		const float Value = Parameters.FloatCurve->GetFloatValue(ElapsedTime);
-		MaterialInstanceDynamic->SetScalarParameterValue(Parameters.MaterialParameterName, Value);
+		if (Parameters.FloatCurve)
+		{
+			const float Value = Parameters.FloatCurve->GetFloatValue(ElapsedTime);
+			MaterialInstanceDynamic->SetScalarParameterValue(Parameters.MaterialParameterName, Value);
+		}
 	}
 	CameraManager->AddCachedPPBlend(OverrideSettings, PostProcessConfig->Weight, VTBlendOrder_Override);
 
@@ -182,9 +183,15 @@ void UPostProcessCallSubsystem::OnWorldPostActorTick(UWorld* InWorld, ELevelTick
 {
 	UWorld* CurrentWorld = GetWorld();
 	if(!CurrentWorld)
+	{
 		return;
+	}
 	auto PCM = UGameplayStatics::GetPlayerCameraManager(CurrentWorld,0);
-
+	if (!PCM)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[UPostProcessCallSubsystem] CameraManager is nullptr"));
+		return;
+	}
 	TArray<int32,TInlineAllocator<16>> DeleteIndexArray{};
 	const int32 NumTask = OverrideTasks.Num();
 	if (NumTask)
