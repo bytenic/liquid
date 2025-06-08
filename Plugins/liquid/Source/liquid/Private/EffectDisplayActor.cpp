@@ -52,7 +52,6 @@ void AEffectDisplayActor::LoadAdditionalNiagaraSystems()
 	}
 }
 
-
 void AEffectDisplayActor::BeginPlay()
 {
 	Super::BeginPlay();
