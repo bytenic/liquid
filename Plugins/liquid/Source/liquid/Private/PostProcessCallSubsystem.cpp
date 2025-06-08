@@ -89,7 +89,7 @@ void FPostProcessOverrideTask::InitializeOverrideSettings()
 
 /**
  * サブシステムの初期化処理。
- * データテーブルを読み込み、WorldPostActorTick に登録。
+ * データテーブルを読み込み、更新処理をWorldPostActorTick に登録。
  */
 void UPostProcessCallSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
