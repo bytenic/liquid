@@ -17,6 +17,8 @@ AEffectDisplayActor::AEffectDisplayActor()
 	PrimaryActorTick.bCanEverTick = true;
 }
 
+#if EFFECT_DISPLAY_ENABLED
+
 void AEffectDisplayActor::LoadAdditionalNiagaraSystems()
 {
 	if(AdditionalNiagaraFolderPath.IsEmpty())
@@ -118,17 +120,6 @@ void AEffectDisplayActor::Tick(float DeltaTime)
 	}
 }
 
-void AEffectDisplayActor::OnNiagaraSystemFinished(UNiagaraComponent* InComp)
-{
-	UE_LOG(LogTemp, Verbose, TEXT("OnNiagaraSystemFinished Called"));
-	if(InComp)
-	{
-		InComp->DestroyComponent();		
-	}
-	NiagaraComponent = nullptr;
-	PlayNext();
-}
-
 void AEffectDisplayActor::StopCurrentPlayEffect()
 {
 	if (NiagaraComponent && NiagaraComponent->IsActive())
@@ -195,3 +186,5 @@ void AEffectDisplayActor::RotationNiagaraSystem(float DeltaTime)const
 	CurrentRotation.Yaw += RotateSpeed * DeltaTime;
 	RotationRoot->SetRelativeRotation(CurrentRotation);
 }
+
+#endif // UE_BUILD_DEVELOPMENT

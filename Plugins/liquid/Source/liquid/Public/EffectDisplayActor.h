@@ -2,6 +2,12 @@
 
 #pragma once
 
+#if UE_BUILD_DEVELOPMENT
+	#define EFFECT_DISPLAY_ENABLED 1
+#else
+	#define EFFECT_DISPLAY_ENABLED 0
+#endif
+
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "EffectDisplayActor.generated.h"
@@ -16,23 +22,21 @@ class LIQUID_API AEffectDisplayActor : public AActor
 	
 public:	
 	AEffectDisplayActor();
+
+#if	EFFECT_DISPLAY_ENABLED
 	
 	virtual void BeginPlay() override;
-	UFUNCTION(BlueprintCallable)
 	void PlayEffect();
 protected:
 	virtual void Tick(float DeltaTime)override;
 	
 private:
-	UFUNCTION()
-	void OnNiagaraSystemFinished(UNiagaraComponent* InComp);
-
 	void StopCurrentPlayEffect();
 	bool PlayNext();
 	bool IsPlaying() const;
 	void RotationNiagaraSystem(float DeltaTime)const ;
 	void LoadAdditionalNiagaraSystems();
-
+#endif //UPROPERTYマクロ関連はビルドから除外できないかったのでここまで
 private:
 	UPROPERTY(EditAnywhere, meta=(ToolTip="再生するエフェクトリスト"))
 	TArray<TObjectPtr<UNiagaraSystem>> Playlist{};
