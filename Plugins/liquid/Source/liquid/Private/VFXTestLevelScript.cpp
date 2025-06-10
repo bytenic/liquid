@@ -14,7 +14,7 @@ void AVFXTestLevelScript::ExecutePostProcessInitVectorParameter(const FName Effe
 	float Z = .0;
 
 	FLinearColor Val(X,Y,Z,.0f);
-	CallSystem->PlayPostEffect(EffectID,[ParameterName, Val](UMaterialInstanceDynamic* DynamicInstance)
+	CallSystem->PlayTransientPostProcess(EffectID,[ParameterName, Val](UMaterialInstanceDynamic* DynamicInstance)
 	{
 		DynamicInstance->SetVectorParameterValue(ParameterName,Val);
 	});

@@ -4,23 +4,23 @@
 #include "PostProcessCallSubsystem.h"
 #include "Kismet/GameplayStatics.h"
 
-FPostProcessOverrideTask::FPostProcessOverrideTask(const FName& EffectID,const FOverridePostProcessConfig* ConfigPtr, UPostProcessCallSubsystem* Owner)
+FTransientPostProcessTask::FTransientPostProcessTask(const FName& EffectID,const FTransientPostProcessConfig* ConfigPtr, UPostProcessCallSubsystem* Owner)
 	: PostProcessConfig(ConfigPtr), Owner(Owner), EffectID(EffectID)
 {
 	
 }
 
-FString FPostProcessOverrideTask::GetReferencerName() const
+FString FTransientPostProcessTask::GetReferencerName() const
 {
 	return TEXT("PostProcessOverrideTask");
 }
 
-void FPostProcessOverrideTask::AddReferencedObjects(FReferenceCollector& Collector)
+void FTransientPostProcessTask::AddReferencedObjects(FReferenceCollector& Collector)
 {
 	Collector.AddReferencedObject(MaterialInstanceDynamic);
 }
 
-bool FPostProcessOverrideTask::Activate()
+bool FTransientPostProcessTask::Activate()
 {
 	if (!CreateMaterialInstanceDynamic())
 	{
@@ -30,7 +30,7 @@ bool FPostProcessOverrideTask::Activate()
 	return true;
 }
 
-bool FPostProcessOverrideTask::Activate(const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction)
+bool FTransientPostProcessTask::Activate(const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction)
 {
 	if (!CreateMaterialInstanceDynamic())
 	{
@@ -49,7 +49,7 @@ bool FPostProcessOverrideTask::Activate(const TFunctionRef<void(UMaterialInstanc
  * @param DeltaTime 経過時間（秒）
  * @return タスクの進行状態
  */
-PostProcessTaskTickResult FPostProcessOverrideTask::Tick(APlayerCameraManager* CameraManager, float DeltaTime)
+PostProcessTaskTickResult FTransientPostProcessTask::Tick(APlayerCameraManager* CameraManager, float DeltaTime)
 {
 	for (const auto& Parameters : PostProcessConfig->ControlParameters)
 	{
@@ -69,12 +69,12 @@ PostProcessTaskTickResult FPostProcessOverrideTask::Tick(APlayerCameraManager* C
 	return ElapsedTime >= PostProcessConfig->Duration ? PostProcessTaskTickResult::Finish : PostProcessTaskTickResult::Progress;
 }
 
-bool FPostProcessOverrideTask::IsScheduleDeleteTask(float CurrentFrameDeltaTime) const
+bool FTransientPostProcessTask::IsScheduleDeleteTask(float CurrentFrameDeltaTime) const
 {
 	return ElapsedTime + CurrentFrameDeltaTime >= PostProcessConfig->Duration;
 }
 
-bool FPostProcessOverrideTask::CreateMaterialInstanceDynamic()
+bool FTransientPostProcessTask::CreateMaterialInstanceDynamic()
 {
 	if(!PostProcessConfig->Material)
 	{
@@ -85,7 +85,7 @@ bool FPostProcessOverrideTask::CreateMaterialInstanceDynamic()
 	return true;
 }
 
-void FPostProcessOverrideTask::InitializeOverrideSettings()
+void FTransientPostProcessTask::InitializeOverrideSettings()
 {
 	FWeightedBlendable Blendable;
 	Blendable.Object = MaterialInstanceDynamic;
@@ -123,15 +123,15 @@ void UPostProcessCallSubsystem::Deinitialize()
  *
  * @param EffectID データテーブル内の行ID
  */
-void UPostProcessCallSubsystem::PlayPostEffect(const FName& EffectID)
+void UPostProcessCallSubsystem::PlayTransientPostProcess(const FName& EffectID)
 {
 	if(!PostProcessTable)
 	{
 		return;
 	}
-	if(const FOverridePostProcessConfig* Row = PostProcessTable->FindRow<FOverridePostProcessConfig>(EffectID, TEXT("PostProcessCallSubsystem")))
+	if(const FTransientPostProcessConfig* Row = PostProcessTable->FindRow<FTransientPostProcessConfig>(EffectID, TEXT("PostProcessCallSubsystem")))
 	{
-		BeginEffect(EffectID, Row);
+		BeginTransientPostProcess(EffectID, Row);
 	}
 	else
 	{
@@ -139,23 +139,23 @@ void UPostProcessCallSubsystem::PlayPostEffect(const FName& EffectID)
 	}
 }
 
-void UPostProcessCallSubsystem::PlayPostEffect(const FName& EffectID,
+void UPostProcessCallSubsystem::PlayTransientPostProcess(const FName& EffectID,
 	const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction)
 {
 	if(!PostProcessTable)
 	{
 		return;
 	}
-	if(const FOverridePostProcessConfig* Row = PostProcessTable->FindRow<FOverridePostProcessConfig>(EffectID, TEXT("PostProcessCallSubsystem")))
+	if(const FTransientPostProcessConfig* Row = PostProcessTable->FindRow<FTransientPostProcessConfig>(EffectID, TEXT("PostProcessCallSubsystem")))
 	{
-		BeginEffect(EffectID, Row, InitFunction);
+		BeginTransientPostProcess(EffectID, Row, InitFunction);
 	}
 }
 
 bool UPostProcessCallSubsystem::IsPlayingOverrideEffect(const FName& EffectID, bool IsNotPostActorTick) const
 {
 	auto ExistTask = OverrideTasks.FindByPredicate(
-		[&EffectID](const TUniquePtr<FPostProcessOverrideTask>& Task)
+		[&EffectID](const TUniquePtr<FTransientPostProcessTask>& Task)
 		{
 			return Task->GetEffectID() == EffectID;
 		});
@@ -182,29 +182,29 @@ bool UPostProcessCallSubsystem::IsPlayingOverrideEffect(const FName& EffectID, b
  * @param EffectID DataTable上のID
  * @param Config 実行するエフェクトの設定情報
  */
-void UPostProcessCallSubsystem::BeginEffect(const FName& EffectID, const FOverridePostProcessConfig* Config)
+void UPostProcessCallSubsystem::BeginTransientPostProcess(const FName& EffectID, const FTransientPostProcessConfig* Config)
 {
-	auto InitTask =	MakeUnique<FPostProcessOverrideTask>(EffectID, Config, this);
+	auto InitTask =	MakeUnique<FTransientPostProcessTask>(EffectID, Config, this);
 	if (InitTask->Activate())
 	{
 		OverrideTasks.Emplace(MoveTemp(InitTask));
 		//memo: 各TaskのTickは降順に実行されるのでここでも降順に実行することで結果的に昇順のタスク実行になるようにする
-		OverrideTasks.Sort([](const TUniquePtr<FPostProcessOverrideTask>& A, const TUniquePtr<FPostProcessOverrideTask>& B)
+		OverrideTasks.Sort([](const TUniquePtr<FTransientPostProcessTask>& A, const TUniquePtr<FTransientPostProcessTask>& B)
 		{
 			return A->GetConfig()->Priority > B->GetConfig()->Priority; 
 		});
 	}
 }
 
-void UPostProcessCallSubsystem::BeginEffect(const FName& EffectID, const FOverridePostProcessConfig* Config,
+void UPostProcessCallSubsystem::BeginTransientPostProcess(const FName& EffectID, const FTransientPostProcessConfig* Config,
 	const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction)
 {
-	auto InitTask =	MakeUnique<FPostProcessOverrideTask>(EffectID, Config, this);
+	auto InitTask =	MakeUnique<FTransientPostProcessTask>(EffectID, Config, this);
 	if (InitTask->Activate(InitFunction))
 	{
 		OverrideTasks.Emplace(MoveTemp(InitTask));
 		//memo: 各TaskのTickは降順に実行されるのでここでも降順に実行することで結果的に昇順のタスク実行になるようにする
-		OverrideTasks.Sort([](const TUniquePtr<FPostProcessOverrideTask>& A, const TUniquePtr<FPostProcessOverrideTask>& B)
+		OverrideTasks.Sort([](const TUniquePtr<FTransientPostProcessTask>& A, const TUniquePtr<FTransientPostProcessTask>& B)
 		{
 			return A->GetConfig()->Priority > B->GetConfig()->Priority; 
 		});
