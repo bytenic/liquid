@@ -84,7 +84,8 @@ public:
 	PostProcessTaskTickResult Tick(APlayerCameraManager* CameraManager, float DeltaTime);
 
 	const FName& GetEffectID() const{return EffectID;}
-	
+	const FOverridePostProcessConfig* GetConfig() const{return PostProcessConfig;}
+
 private:
 	bool CreateMaterialInstanceDynamic();
 	void InitializeOverrideSettings();

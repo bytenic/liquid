@@ -159,6 +159,10 @@ void UPostProcessCallSubsystem::BeginEffect(const FName& EffectID, const FOverri
 	if (InitTask->Activate())
 	{
 		OverrideTasks.Emplace(MoveTemp(InitTask));
+		OverrideTasks.Sort([](const TUniquePtr<FPostProcessOverrideTask>& A, const TUniquePtr<FPostProcessOverrideTask>& B)
+		{
+			return A->GetConfig()->Priority < B->GetConfig()->Priority; 
+		});
 	}
 }
 
@@ -169,6 +173,10 @@ void UPostProcessCallSubsystem::BeginEffect(const FName& EffectID, const FOverri
 	if (InitTask->Activate(InitFunction))
 	{
 		OverrideTasks.Emplace(MoveTemp(InitTask));
+		OverrideTasks.Sort([](const TUniquePtr<FPostProcessOverrideTask>& A, const TUniquePtr<FPostProcessOverrideTask>& B)
+		{
+			return A->GetConfig()->Priority < B->GetConfig()->Priority; 
+		});
 	}
 }
 
