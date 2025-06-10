@@ -159,9 +159,10 @@ void UPostProcessCallSubsystem::BeginEffect(const FName& EffectID, const FOverri
 	if (InitTask->Activate())
 	{
 		OverrideTasks.Emplace(MoveTemp(InitTask));
+		//memo: 各TaskのTickは降順に実行されるのでここでも降順に実行することで結果的に昇順のタスク実行になるようにする
 		OverrideTasks.Sort([](const TUniquePtr<FPostProcessOverrideTask>& A, const TUniquePtr<FPostProcessOverrideTask>& B)
 		{
-			return A->GetConfig()->Priority < B->GetConfig()->Priority; 
+			return A->GetConfig()->Priority > B->GetConfig()->Priority; 
 		});
 	}
 }
@@ -173,9 +174,10 @@ void UPostProcessCallSubsystem::BeginEffect(const FName& EffectID, const FOverri
 	if (InitTask->Activate(InitFunction))
 	{
 		OverrideTasks.Emplace(MoveTemp(InitTask));
+		//memo: 各TaskのTickは降順に実行されるのでここでも降順に実行することで結果的に昇順のタスク実行になるようにする
 		OverrideTasks.Sort([](const TUniquePtr<FPostProcessOverrideTask>& A, const TUniquePtr<FPostProcessOverrideTask>& B)
 		{
-			return A->GetConfig()->Priority < B->GetConfig()->Priority; 
+			return A->GetConfig()->Priority > B->GetConfig()->Priority; 
 		});
 	}
 }
@@ -202,21 +204,19 @@ void UPostProcessCallSubsystem::OnWorldPostActorTick(UWorld* InWorld, ELevelTick
 		UE_LOG(LogTemp, Verbose, TEXT("[UPostProcessCallSubsystem] CameraManager is nullptr"));
 		return;
 	}
-	TArray<int32,TInlineAllocator<16>> DeleteIndexArray{};
 	const int32 NumTask = OverrideTasks.Num();
 	if (NumTask >= 16)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[UPostProcessCallSubsystem] Override Postprocess Task Size is Over Delete Index Array NumTask: %d"), NumTask);	
 	}
-	for (int32 Index = 0 ; Index < NumTask ; Index++)
+	//memo: 独立したタスク削除ループを行わないようにするために降順でTickをまわす。OverrideTasksは降順にソートされているため結果的に昇順に実行される
+	for (int32 Index = NumTask -1 ; Index >= 0 ; --Index)
 	{
+		//UE_LOG(LogTemp, Log, TEXT("[UPostProcessCallSubsystem] Tick %s"),*OverrideTasks[Index]->GetEffectID().ToString());
 		if (OverrideTasks[Index]->Tick(PCM, DeltaTime) == PostProcessTaskTickResult::Finish)
 		{
-			DeleteIndexArray.Add(Index);
+			//UE_LOG(LogTemp, Log, TEXT("[UPostProcessCallSubsystem] Finish %s"),*OverrideTasks[Index]->GetEffectID().ToString());
+			OverrideTasks.RemoveAt(Index);
 		}
-	}
-	for (const auto Index : DeleteIndexArray)
-	{
-		OverrideTasks.RemoveAt(Index);
 	}
 }
