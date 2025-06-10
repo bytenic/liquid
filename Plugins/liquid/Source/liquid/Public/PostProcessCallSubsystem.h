@@ -12,7 +12,7 @@
  * PostprocessMaterialの（float）パラメータをカーブで制御するための構造体
  */
 USTRUCT(BlueprintType)
-struct FPostprocessControlParameters
+struct FPostProcessControlParams
 {
 	GENERATED_BODY()
 	
@@ -42,7 +42,7 @@ struct FTransientPostProcessConfig : public FTableRowBase
 	float Duration = 2.0f;
 	
 	UPROPERTY(EditAnywhere, BlueprintReadOnly,meta=(ToolTip="操作するマテリアルパラメータ"))
-	TArray<FPostprocessControlParameters> ControlParameters;
+	TArray<FPostProcessControlParams> ControlParameters;
 };
 
 /**
