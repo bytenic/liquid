@@ -86,6 +86,8 @@ public:
 	const FName& GetEffectID() const{return EffectID;}
 	const FOverridePostProcessConfig* GetConfig() const{return PostProcessConfig;}
 
+	bool IsScheduleDeleteTask(float CurrentFrameDeltaTime) const;
+
 private:
 	bool CreateMaterialInstanceDynamic();
 	void InitializeOverrideSettings();
@@ -120,6 +122,8 @@ public:
 	UFUNCTION(BlueprintCallable,Category="PostProcess", meta=(ToolTip="データテーブル上のIDに基づいてポストエフェクトを呼び出します"))
 	void PlayPostEffect(const FName& EffectID);
 	void PlayPostEffect(const FName& EffectID, const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction);
+
+	bool IsPlayingOverrideEffect(const FName& EffectID, bool IsNotPostActorTick = false) const;
 	
 private:
 	/** エフェクトの適用開始 */

@@ -18,4 +18,6 @@ class LIQUID_API AVFXTestLevelScript : public ALevelScriptActor
 public:
 	UFUNCTION(BlueprintCallable)
 	void ExecutePostProcessInitVectorParameter(const FName EffectID, const FName ParameterName);
+	UFUNCTION(BlueprintCallable)
+	bool IsExecuteAdditionalPostEffect(const FName EffectID);
 };

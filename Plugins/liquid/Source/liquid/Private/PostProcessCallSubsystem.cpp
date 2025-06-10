@@ -69,6 +69,11 @@ PostProcessTaskTickResult FPostProcessOverrideTask::Tick(APlayerCameraManager* C
 	return ElapsedTime >= PostProcessConfig->Duration ? PostProcessTaskTickResult::Finish : PostProcessTaskTickResult::Progress;
 }
 
+bool FPostProcessOverrideTask::IsScheduleDeleteTask(float CurrentFrameDeltaTime) const
+{
+	return ElapsedTime + CurrentFrameDeltaTime >= PostProcessConfig->Duration;
+}
+
 bool FPostProcessOverrideTask::CreateMaterialInstanceDynamic()
 {
 	if(!PostProcessConfig->Material)
@@ -145,6 +150,30 @@ void UPostProcessCallSubsystem::PlayPostEffect(const FName& EffectID,
 	{
 		BeginEffect(EffectID, Row, InitFunction);
 	}
+}
+
+bool UPostProcessCallSubsystem::IsPlayingOverrideEffect(const FName& EffectID, bool IsNotPostActorTick) const
+{
+	auto ExistTask = OverrideTasks.FindByPredicate(
+		[&EffectID](const TUniquePtr<FPostProcessOverrideTask>& Task)
+		{
+			return Task->GetEffectID() == EffectID;
+		});
+	if (!ExistTask)
+	{
+		return false;
+	}
+	if (ExistTask->IsValid())
+	{
+		if (IsNotPostActorTick)
+		{
+			float Delta = UGameplayStatics::GetWorldDeltaSeconds(GetWorld());
+			return (*ExistTask)->IsScheduleDeleteTask(Delta);
+		}
+		return true;
+	}
+	
+	return false;
 }
 
 /**

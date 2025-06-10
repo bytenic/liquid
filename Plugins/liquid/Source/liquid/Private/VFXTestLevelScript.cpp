@@ -19,3 +19,11 @@ void AVFXTestLevelScript::ExecutePostProcessInitVectorParameter(const FName Effe
 		DynamicInstance->SetVectorParameterValue(ParameterName,Val);
 	});
 }
+
+bool AVFXTestLevelScript::IsExecuteAdditionalPostEffect(const FName EffectID)
+{
+	auto CallSystem = GetWorld()->GetSubsystem<UPostProcessCallSubsystem>();
+	if (!CallSystem)
+		return false;
+	return CallSystem->IsPlayingOverrideEffect(EffectID);
+}
