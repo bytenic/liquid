@@ -32,6 +32,9 @@ struct FOverridePostProcessConfig : public FTableRowBase
 	UPROPERTY(EditAnywhere, BlueprintReadOnly,meta=(ToolTip="適用するMaterial ※PostProcessMaterial以外を設定しないこと"))
 	TObjectPtr<UMaterialInstance> Material{nullptr}; //memo: ハードリファレンスになると初期化時にすべてLoadされるためTSoftObjectPtrの方がいいかも
 
+	UPROPERTY(EditAnywhere,BlueprintReadOnly, meta=(ToolTip="適用順序のプライオリティ(低いほど先に実行されます)"))
+	int32 Priority = 0;
+	
 	UPROPERTY(EditAnywhere,BlueprintReadOnly, meta=(ToolTip="このポストプロセスのアルファ値(0で何もしない、1で完全適用)"))
 	float Weight = 1.0f;
 	
@@ -61,10 +64,11 @@ public:
 
 	/**
 	 * コンストラクタ
+	 * * @param EffectID DataTable上のID
 	 * @param ConfigPtr 使用する構成情報
 	 * @param Owner 所有者（Subsystem）
 	 */	
-	explicit FPostProcessOverrideTask(const FOverridePostProcessConfig* ConfigPtr, UPostProcessCallSubsystem* Owner);
+	explicit FPostProcessOverrideTask(const FName& EffectID, const FOverridePostProcessConfig* ConfigPtr, UPostProcessCallSubsystem* Owner);
 	/** GC参照の識別子名 */
 	virtual FString GetReferencerName() const override;
 	/** GC参照対象を追加 */
@@ -79,6 +83,8 @@ public:
 	 */	
 	PostProcessTaskTickResult Tick(APlayerCameraManager* CameraManager, float DeltaTime);
 
+	const FName& GetEffectID() const{return EffectID;}
+	
 private:
 	bool CreateMaterialInstanceDynamic();
 	void InitializeOverrideSettings();
@@ -90,6 +96,7 @@ private:
 	//memo: このオブジェクトをGCオブジェクトとして保護
 	TObjectPtr<UMaterialInstanceDynamic> MaterialInstanceDynamic{nullptr};
 	FPostProcessSettings OverrideSettings{};
+	FName EffectID{}; //DataTable上のID
 	float ElapsedTime = .0f;
 };
 
@@ -110,13 +117,13 @@ public:
 	 * @param EffectID データテーブル内の行ID
 	 */	
 	UFUNCTION(BlueprintCallable,Category="PostProcess", meta=(ToolTip="データテーブル上のIDに基づいてポストエフェクトを呼び出します"))
-	void PlayPostEffect(const FName EffectID);
-	void PlayPostEffect(const FName EffectID, const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction);
+	void PlayPostEffect(const FName& EffectID);
+	void PlayPostEffect(const FName& EffectID, const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction);
 	
 private:
 	/** エフェクトの適用開始 */
-	void BeginEffect(const FOverridePostProcessConfig* Config);
-	void BeginEffect(const FOverridePostProcessConfig* Config, const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction);
+	void BeginEffect(const FName& EffectID, const FOverridePostProcessConfig* Config);
+	void BeginEffect(const FName& EffectID, const FOverridePostProcessConfig* Config, const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction);
 	
 	/** WorldのPostTick時に呼び出されるタスク更新関数 */
 	void OnWorldPostActorTick(UWorld* InWorld, ELevelTick InType,float DeltaTime);

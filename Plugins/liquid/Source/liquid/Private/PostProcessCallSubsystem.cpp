@@ -4,8 +4,8 @@
 #include "PostProcessCallSubsystem.h"
 #include "Kismet/GameplayStatics.h"
 
-FPostProcessOverrideTask::FPostProcessOverrideTask(const FOverridePostProcessConfig* ConfigPtr, UPostProcessCallSubsystem* Owner)
-	: PostProcessConfig(ConfigPtr), Owner(Owner)
+FPostProcessOverrideTask::FPostProcessOverrideTask(const FName& EffectID,const FOverridePostProcessConfig* ConfigPtr, UPostProcessCallSubsystem* Owner)
+	: PostProcessConfig(ConfigPtr), Owner(Owner), EffectID(EffectID)
 {
 	
 }
@@ -118,7 +118,7 @@ void UPostProcessCallSubsystem::Deinitialize()
  *
  * @param EffectID データテーブル内の行ID
  */
-void UPostProcessCallSubsystem::PlayPostEffect(const FName EffectID)
+void UPostProcessCallSubsystem::PlayPostEffect(const FName& EffectID)
 {
 	if(!PostProcessTable)
 	{
@@ -126,7 +126,7 @@ void UPostProcessCallSubsystem::PlayPostEffect(const FName EffectID)
 	}
 	if(const FOverridePostProcessConfig* Row = PostProcessTable->FindRow<FOverridePostProcessConfig>(EffectID, TEXT("PostProcessCallSubsystem")))
 	{
-		BeginEffect(Row);
+		BeginEffect(EffectID, Row);
 	}
 	else
 	{
@@ -134,7 +134,7 @@ void UPostProcessCallSubsystem::PlayPostEffect(const FName EffectID)
 	}
 }
 
-void UPostProcessCallSubsystem::PlayPostEffect(const FName EffectID,
+void UPostProcessCallSubsystem::PlayPostEffect(const FName& EffectID,
 	const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction)
 {
 	if(!PostProcessTable)
@@ -143,28 +143,29 @@ void UPostProcessCallSubsystem::PlayPostEffect(const FName EffectID,
 	}
 	if(const FOverridePostProcessConfig* Row = PostProcessTable->FindRow<FOverridePostProcessConfig>(EffectID, TEXT("PostProcessCallSubsystem")))
 	{
-		BeginEffect(Row, InitFunction);
+		BeginEffect(EffectID, Row, InitFunction);
 	}
 }
 
 /**
  * タスクを初期化・有効化し、実行中タスクリストに追加
  *
+ * @param EffectID DataTable上のID
  * @param Config 実行するエフェクトの設定情報
  */
-void UPostProcessCallSubsystem::BeginEffect(const FOverridePostProcessConfig* Config)
+void UPostProcessCallSubsystem::BeginEffect(const FName& EffectID, const FOverridePostProcessConfig* Config)
 {
-	auto InitTask =	MakeUnique<FPostProcessOverrideTask>(Config, this);
+	auto InitTask =	MakeUnique<FPostProcessOverrideTask>(EffectID, Config, this);
 	if (InitTask->Activate())
 	{
 		OverrideTasks.Emplace(MoveTemp(InitTask));
 	}
 }
 
-void UPostProcessCallSubsystem::BeginEffect(const FOverridePostProcessConfig* Config,
+void UPostProcessCallSubsystem::BeginEffect(const FName& EffectID, const FOverridePostProcessConfig* Config,
 	const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction)
 {
-	auto InitTask =	MakeUnique<FPostProcessOverrideTask>(Config, this);
+	auto InitTask =	MakeUnique<FPostProcessOverrideTask>(EffectID, Config, this);
 	if (InitTask->Activate(InitFunction))
 	{
 		OverrideTasks.Emplace(MoveTemp(InitTask));
@@ -189,12 +190,13 @@ void UPostProcessCallSubsystem::OnWorldPostActorTick(UWorld* InWorld, ELevelTick
 	auto PCM = UGameplayStatics::GetPlayerCameraManager(CurrentWorld,0);
 	if (!PCM)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[UPostProcessCallSubsystem] CameraManager is nullptr"));
+		//Editorでもここに来るのでVerboseにする
+		UE_LOG(LogTemp, Verbose, TEXT("[UPostProcessCallSubsystem] CameraManager is nullptr"));
 		return;
 	}
 	TArray<int32,TInlineAllocator<16>> DeleteIndexArray{};
 	const int32 NumTask = OverrideTasks.Num();
-	if (NumTask)
+	if (NumTask >= 16)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[UPostProcessCallSubsystem] Override Postprocess Task Size is Over Delete Index Array NumTask: %d"), NumTask);	
 	}
