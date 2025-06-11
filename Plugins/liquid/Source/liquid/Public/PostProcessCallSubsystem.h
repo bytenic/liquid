@@ -30,7 +30,7 @@ struct FTransientPostProcessConfig : public FTableRowBase
 {
 	GENERATED_BODY()	
 	UPROPERTY(EditAnywhere, BlueprintReadOnly,meta=(ToolTip="適用するMaterial ※PostProcessMaterial以外を設定しないこと"))
-	TObjectPtr<UMaterialInstance> Material{nullptr}; //memo: ハードリファレンスになると初期化時にすべてLoadされるためTSoftObjectPtrの方がいいかも
+	TObjectPtr<UMaterialInstance> Material{nullptr}; //TODO: ハードリファレンスになると初期化時にすべてLoadされるためTSoftObjectPtrへの移行
 
 	UPROPERTY(EditAnywhere,BlueprintReadOnly, meta=(ToolTip="適用順序のプライオリティ(低いほど先に実行されます)"))
 	int32 Priority = 0;
@@ -58,7 +58,7 @@ enum class PostProcessTaskTickResult : uint8
 /**
  * 単一のポストプロセスエフェクトを実行・制御するタスク
  */
-class FTransientPostProcessTask : FGCObject
+class FTransientPostProcessTask : public FGCObject
 {
 public:
 
@@ -123,7 +123,7 @@ public:
 	void PlayTransientPostProcess(const FName& EffectID);
 	void PlayTransientPostProcess(const FName& EffectID, const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction);
 
-	bool IsPlayingOverrideEffect(const FName& EffectID, bool IsNotPostActorTick = false) const;
+	bool IsPlayingTransientPostProcess(const FName& EffectID, bool IsNotPostActorTick = false) const;
 	
 private:
 	/** エフェクトの適用開始 */
@@ -136,7 +136,7 @@ private:
 	UPROPERTY()
 	TObjectPtr<UDataTable> PostProcessTable{nullptr};
 	
-	TArray<TUniquePtr<FTransientPostProcessTask>> OverrideTasks;
+	TArray<TUniquePtr<FTransientPostProcessTask>> TransientTasks;
 	FDelegateHandle PostActorTickHandle;
 	
 	static constexpr TCHAR TableAssetPath[] = TEXT("/liquid/post_process/sample_table");

@@ -152,9 +152,9 @@ void UPostProcessCallSubsystem::PlayTransientPostProcess(const FName& EffectID,
 	}
 }
 
-bool UPostProcessCallSubsystem::IsPlayingOverrideEffect(const FName& EffectID, bool IsNotPostActorTick) const
+bool UPostProcessCallSubsystem::IsPlayingTransientPostProcess(const FName& EffectID, bool IsNotPostActorTick) const
 {
-	auto ExistTask = OverrideTasks.FindByPredicate(
+	auto ExistTask = TransientTasks.FindByPredicate(
 		[&EffectID](const TUniquePtr<FTransientPostProcessTask>& Task)
 		{
 			return Task->GetEffectID() == EffectID;
@@ -187,9 +187,9 @@ void UPostProcessCallSubsystem::BeginTransientPostProcess(const FName& EffectID,
 	auto InitTask =	MakeUnique<FTransientPostProcessTask>(EffectID, Config, this);
 	if (InitTask->Activate())
 	{
-		OverrideTasks.Emplace(MoveTemp(InitTask));
+		TransientTasks.Emplace(MoveTemp(InitTask));
 		//memo: 各TaskのTickは降順に実行されるのでここでも降順に実行することで結果的に昇順のタスク実行になるようにする
-		OverrideTasks.Sort([](const TUniquePtr<FTransientPostProcessTask>& A, const TUniquePtr<FTransientPostProcessTask>& B)
+		TransientTasks.Sort([](const TUniquePtr<FTransientPostProcessTask>& A, const TUniquePtr<FTransientPostProcessTask>& B)
 		{
 			return A->GetConfig()->Priority > B->GetConfig()->Priority; 
 		});
@@ -202,9 +202,9 @@ void UPostProcessCallSubsystem::BeginTransientPostProcess(const FName& EffectID,
 	auto InitTask =	MakeUnique<FTransientPostProcessTask>(EffectID, Config, this);
 	if (InitTask->Activate(InitFunction))
 	{
-		OverrideTasks.Emplace(MoveTemp(InitTask));
+		TransientTasks.Emplace(MoveTemp(InitTask));
 		//memo: 各TaskのTickは降順に実行されるのでここでも降順に実行することで結果的に昇順のタスク実行になるようにする
-		OverrideTasks.Sort([](const TUniquePtr<FTransientPostProcessTask>& A, const TUniquePtr<FTransientPostProcessTask>& B)
+		TransientTasks.Sort([](const TUniquePtr<FTransientPostProcessTask>& A, const TUniquePtr<FTransientPostProcessTask>& B)
 		{
 			return A->GetConfig()->Priority > B->GetConfig()->Priority; 
 		});
@@ -233,7 +233,7 @@ void UPostProcessCallSubsystem::OnWorldPostActorTick(UWorld* InWorld, ELevelTick
 		UE_LOG(LogTemp, Verbose, TEXT("[UPostProcessCallSubsystem] CameraManager is nullptr"));
 		return;
 	}
-	const int32 NumTask = OverrideTasks.Num();
+	const int32 NumTask = TransientTasks.Num();
 	if (NumTask >= 16)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[UPostProcessCallSubsystem] Override Postprocess Task Size is Over Delete Index Array NumTask: %d"), NumTask);	
@@ -242,10 +242,10 @@ void UPostProcessCallSubsystem::OnWorldPostActorTick(UWorld* InWorld, ELevelTick
 	for (int32 Index = NumTask -1 ; Index >= 0 ; --Index)
 	{
 		//UE_LOG(LogTemp, Log, TEXT("[UPostProcessCallSubsystem] Tick %s"),*OverrideTasks[Index]->GetEffectID().ToString());
-		if (OverrideTasks[Index]->Tick(PCM, DeltaTime) == PostProcessTaskTickResult::Finish)
+		if (TransientTasks[Index]->Tick(PCM, DeltaTime) == PostProcessTaskTickResult::Finish)
 		{
 			//UE_LOG(LogTemp, Log, TEXT("[UPostProcessCallSubsystem] Finish %s"),*OverrideTasks[Index]->GetEffectID().ToString());
-			OverrideTasks.RemoveAt(Index);
+			TransientTasks.RemoveAt(Index);
 		}
 	}
 }
