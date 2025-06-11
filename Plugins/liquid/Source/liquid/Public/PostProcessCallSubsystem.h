@@ -19,7 +19,7 @@ struct FPostProcessControlParams
 	UPROPERTY(EditAnywhere,meta=(ToolTip="操作するマテリアルパラメータ名"))
 	FName MaterialParameterName = NAME_None;
 	UPROPERTY(EditAnywhere,meta=(ToolTip="パラメータを操作するFloatカーブアセット"))
-	TObjectPtr<UCurveFloat> FloatCurve{};
+	TObjectPtr<UCurveFloat> NormalizedFloatCurve{};
 };
 
 /**
@@ -35,11 +35,14 @@ struct FTransientPostProcessConfig : public FTableRowBase
 	UPROPERTY(EditAnywhere,BlueprintReadOnly, meta=(ToolTip="適用順序のプライオリティ(低いほど先に実行されます)"))
 	int32 Priority = 0;
 	
-	UPROPERTY(EditAnywhere,BlueprintReadOnly, meta=(ToolTip="このポストプロセスのアルファ値(0で何もしない、1で完全適用)"))
-	float Weight = 1.0f;
-	
 	UPROPERTY(EditAnywhere,BlueprintReadOnly, meta=(ToolTip="適用する時間"))
 	float Duration = 2.0f;
+
+	UPROPERTY(EditAnywhere,meta=(ToolTip="このポストプロセスのアルファ値の初期値(0で何もしない、1で完全適用)Weightをコントロールするカーブアセット"))
+	float InitialWeight = 1.0f;
+	
+	UPROPERTY(EditAnywhere,meta=(ToolTip="このポストプロセスのアルファ値(0で何もしない、1で完全適用)Weightをコントロールするカーブアセット。Noneの場合はInitialWeightを使用します"))
+	TObjectPtr<UCurveFloat> NormalizedWeightCurve{};
 	
 	UPROPERTY(EditAnywhere, BlueprintReadOnly,meta=(ToolTip="操作するマテリアルパラメータ"))
 	TArray<FPostProcessControlParams> ControlParameters;
@@ -51,8 +54,7 @@ struct FTransientPostProcessConfig : public FTableRowBase
 enum class PostProcessTaskTickResult : uint8
 {
 	Progress,
-	Finish,
-	Failed, //現在未使用
+	Finish
 };
 
 /**
@@ -90,6 +92,7 @@ public:
 
 private:
 	bool CreateMaterialInstanceDynamic();
+	void Cleanup();
 	void InitializeOverrideSettings();
 private:
 	//memo: このふたつのポインタはUPostProcessCallSubsystemよりもこのクラスのライフサイクルが短いことと、DatatableをUPROPERTYで保持しているため生ポインタで保持している
@@ -120,15 +123,15 @@ public:
 	 * @param EffectID データテーブル内の行ID
 	 */	
 	UFUNCTION(BlueprintCallable,Category="PostProcess", meta=(ToolTip="データテーブル上のIDに基づいてポストエフェクトを呼び出します"))
-	void PlayTransientPostProcess(const FName& EffectID);
-	void PlayTransientPostProcess(const FName& EffectID, const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction);
+	bool PlayTransientPostProcess(const FName& EffectID);
+	bool PlayTransientPostProcess(const FName& EffectID, const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction);
 
-	bool IsPlayingTransientPostProcess(const FName& EffectID, bool IsNotPostActorTick = false) const;
+	bool IsPlayingTransientPostProcess(const FName& EffectID, bool IsCalledOutsidePostTick = false) const;
 	
 private:
 	/** エフェクトの適用開始 */
-	void BeginTransientPostProcess(const FName& EffectID, const FTransientPostProcessConfig* Config);
-	void BeginTransientPostProcess(const FName& EffectID, const FTransientPostProcessConfig* Config, const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction);
+	bool BeginTransientPostProcess(const FName& EffectID, const FTransientPostProcessConfig* Config);
+	bool BeginTransientPostProcess(const FName& EffectID, const FTransientPostProcessConfig* Config, const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction);
 	
 	/** WorldのPostTick時に呼び出されるタスク更新関数 */
 	void OnWorldPostActorTick(UWorld* InWorld, ELevelTick InType,float DeltaTime);
@@ -140,4 +143,5 @@ private:
 	FDelegateHandle PostActorTickHandle;
 	
 	static constexpr TCHAR TableAssetPath[] = TEXT("/liquid/post_process/sample_table");
+	static constexpr int32 TransientPostProcessCapacity = 16;
 };

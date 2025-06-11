@@ -7,7 +7,7 @@
 FTransientPostProcessTask::FTransientPostProcessTask(const FName& EffectID,const FTransientPostProcessConfig* ConfigPtr, UPostProcessCallSubsystem* Owner)
 	: PostProcessConfig(ConfigPtr), Owner(Owner), EffectID(EffectID)
 {
-	
+	check(Owner);
 }
 
 FString FTransientPostProcessTask::GetReferencerName() const
@@ -51,22 +51,35 @@ bool FTransientPostProcessTask::Activate(const TFunctionRef<void(UMaterialInstan
  */
 PostProcessTaskTickResult FTransientPostProcessTask::Tick(APlayerCameraManager* CameraManager, float DeltaTime)
 {
+	ElapsedTime += DeltaTime;
+	float NormalizedElapsedTime = ElapsedTime / PostProcessConfig->Duration;
+	NormalizedElapsedTime = FMath::Clamp(NormalizedElapsedTime, 0.0f, 1.0f);
 	for (const auto& Parameters : PostProcessConfig->ControlParameters)
 	{
 		if (Parameters.MaterialParameterName ==  NAME_None)
 		{
 			continue;
 		}
-		if (Parameters.FloatCurve)
+		if (Parameters.NormalizedFloatCurve)
 		{
-			const float Value = Parameters.FloatCurve->GetFloatValue(ElapsedTime);
+			const float Value = Parameters.NormalizedFloatCurve->GetFloatValue(NormalizedElapsedTime);
 			MaterialInstanceDynamic->SetScalarParameterValue(Parameters.MaterialParameterName, Value);
 		}
 	}
-	CameraManager->AddCachedPPBlend(OverrideSettings, PostProcessConfig->Weight, VTBlendOrder_Override);
+	float CurrentWeight = PostProcessConfig->InitialWeight;
+	if (PostProcessConfig->NormalizedWeightCurve)
+	{
+		CurrentWeight = PostProcessConfig->NormalizedWeightCurve->GetFloatValue(NormalizedElapsedTime);
+	}
+	CameraManager->AddCachedPPBlend(OverrideSettings, CurrentWeight, VTBlendOrder_Override);
+	
+	if ( ElapsedTime >= PostProcessConfig->Duration)
+	{
+		Cleanup();
+		return PostProcessTaskTickResult::Finish;
+	}
+	return PostProcessTaskTickResult::Progress;
 
-	ElapsedTime += DeltaTime;
-	return ElapsedTime >= PostProcessConfig->Duration ? PostProcessTaskTickResult::Finish : PostProcessTaskTickResult::Progress;
 }
 
 bool FTransientPostProcessTask::IsScheduleDeleteTask(float CurrentFrameDeltaTime) const
@@ -82,7 +95,22 @@ bool FTransientPostProcessTask::CreateMaterialInstanceDynamic()
 		return false;
 	}
 	MaterialInstanceDynamic = UMaterialInstanceDynamic::Create(PostProcessConfig->Material,Owner);
+	if (!MaterialInstanceDynamic)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[FPostProcessOverrideTask] Failed Create Material Instance Dynamic"));
+		return false;
+	}
 	return true;
+}
+
+void FTransientPostProcessTask::Cleanup()
+{
+	// MID を即座に GC 対象へ
+	if (MaterialInstanceDynamic)
+	{
+		MaterialInstanceDynamic->MarkAsGarbage();
+		MaterialInstanceDynamic = nullptr;
+	}
 }
 
 void FTransientPostProcessTask::InitializeOverrideSettings()
@@ -101,7 +129,7 @@ void UPostProcessCallSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
 	PostProcessTable = Cast<UDataTable>(StaticLoadObject(UDataTable::StaticClass(), nullptr, TableAssetPath));
-	
+	TransientTasks.Reserve(TransientPostProcessCapacity);
 	if(!PostProcessTable)
 	{
 		UE_LOG(LogTemp, Error, TEXT("[UPostProcessCallSubsystem] Data Table Load Failed"));	
@@ -123,36 +151,51 @@ void UPostProcessCallSubsystem::Deinitialize()
  *
  * @param EffectID データテーブル内の行ID
  */
-void UPostProcessCallSubsystem::PlayTransientPostProcess(const FName& EffectID)
+bool UPostProcessCallSubsystem::PlayTransientPostProcess(const FName& EffectID)
 {
 	if(!PostProcessTable)
 	{
-		return;
+		UE_LOG(LogTemp, Error, TEXT("[UPostProcessCallSubsystem] PostProcessTable is nullptr"));
+		return false;
 	}
 	if(const FTransientPostProcessConfig* Row = PostProcessTable->FindRow<FTransientPostProcessConfig>(EffectID, TEXT("PostProcessCallSubsystem")))
 	{
-		BeginTransientPostProcess(EffectID, Row);
+	
+		if (Row->Duration <= .0f)
+		{
+			UE_LOG(LogTemp, Error, TEXT("[UPostProcessCallSubsystem] Duration is 0 EffectID: %s "), *EffectID.ToString());
+			return false;
+		}
+		return BeginTransientPostProcess(EffectID, Row);
 	}
 	else
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[UPostProcessCallSubsystem] Not Found ID: %s "), *EffectID.ToString());	
+		UE_LOG(LogTemp, Error, TEXT("[UPostProcessCallSubsystem] Not Found ID: %s "), *EffectID.ToString());	
 	}
+	return false;
 }
 
-void UPostProcessCallSubsystem::PlayTransientPostProcess(const FName& EffectID,
+bool UPostProcessCallSubsystem::PlayTransientPostProcess(const FName& EffectID,
 	const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction)
 {
 	if(!PostProcessTable)
 	{
-		return;
+		UE_LOG(LogTemp, Error, TEXT("[UPostProcessCallSubsystem] PostProcessTable is nullptr"));
+		return false;
 	}
 	if(const FTransientPostProcessConfig* Row = PostProcessTable->FindRow<FTransientPostProcessConfig>(EffectID, TEXT("PostProcessCallSubsystem")))
 	{
-		BeginTransientPostProcess(EffectID, Row, InitFunction);
+		if (Row->Duration <= .0f)
+		{
+			UE_LOG(LogTemp, Error, TEXT("[UPostProcessCallSubsystem] Duration is 0 EffectID: %s "), *EffectID.ToString());
+			return false;
+		}
+		return BeginTransientPostProcess(EffectID, Row, InitFunction);
 	}
+	return false;
 }
 
-bool UPostProcessCallSubsystem::IsPlayingTransientPostProcess(const FName& EffectID, bool IsNotPostActorTick) const
+bool UPostProcessCallSubsystem::IsPlayingTransientPostProcess(const FName& EffectID, bool IsCalledOutsidePostTick) const
 {
 	auto ExistTask = TransientTasks.FindByPredicate(
 		[&EffectID](const TUniquePtr<FTransientPostProcessTask>& Task)
@@ -165,14 +208,13 @@ bool UPostProcessCallSubsystem::IsPlayingTransientPostProcess(const FName& Effec
 	}
 	if (ExistTask->IsValid())
 	{
-		if (IsNotPostActorTick)
+		if (IsCalledOutsidePostTick)
 		{
 			float Delta = UGameplayStatics::GetWorldDeltaSeconds(GetWorld());
-			return (*ExistTask)->IsScheduleDeleteTask(Delta);
+			return !(*ExistTask)->IsScheduleDeleteTask(Delta);
 		}
 		return true;
 	}
-	
 	return false;
 }
 
@@ -182,7 +224,7 @@ bool UPostProcessCallSubsystem::IsPlayingTransientPostProcess(const FName& Effec
  * @param EffectID DataTable上のID
  * @param Config 実行するエフェクトの設定情報
  */
-void UPostProcessCallSubsystem::BeginTransientPostProcess(const FName& EffectID, const FTransientPostProcessConfig* Config)
+bool UPostProcessCallSubsystem::BeginTransientPostProcess(const FName& EffectID, const FTransientPostProcessConfig* Config)
 {
 	auto InitTask =	MakeUnique<FTransientPostProcessTask>(EffectID, Config, this);
 	if (InitTask->Activate())
@@ -193,10 +235,12 @@ void UPostProcessCallSubsystem::BeginTransientPostProcess(const FName& EffectID,
 		{
 			return A->GetConfig()->Priority > B->GetConfig()->Priority; 
 		});
+		return true;
 	}
+	return false;
 }
 
-void UPostProcessCallSubsystem::BeginTransientPostProcess(const FName& EffectID, const FTransientPostProcessConfig* Config,
+bool UPostProcessCallSubsystem::BeginTransientPostProcess(const FName& EffectID, const FTransientPostProcessConfig* Config,
 	const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction)
 {
 	auto InitTask =	MakeUnique<FTransientPostProcessTask>(EffectID, Config, this);
@@ -208,7 +252,9 @@ void UPostProcessCallSubsystem::BeginTransientPostProcess(const FName& EffectID,
 		{
 			return A->GetConfig()->Priority > B->GetConfig()->Priority; 
 		});
+		return true;
 	}
+	return false;
 }
 
 /**
@@ -234,17 +280,17 @@ void UPostProcessCallSubsystem::OnWorldPostActorTick(UWorld* InWorld, ELevelTick
 		return;
 	}
 	const int32 NumTask = TransientTasks.Num();
-	if (NumTask >= 16)
+	if (NumTask >= TransientPostProcessCapacity)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[UPostProcessCallSubsystem] Override Postprocess Task Size is Over Delete Index Array NumTask: %d"), NumTask);	
+		UE_LOG(LogTemp, Warning, TEXT("[UPostProcessCallSubsystem] Transient Postprocess Task Size is Over Delete Index Array NumTask: %d"), NumTask);	
 	}
-	//memo: 独立したタスク削除ループを行わないようにするために降順でTickをまわす。OverrideTasksは降順にソートされているため結果的に昇順に実行される
+	//memo: 独立したタスク削除ループを行わないようにするために降順でTickをまわすTransientTasksは降順にソートされているため結果的に昇順に実行される
 	for (int32 Index = NumTask -1 ; Index >= 0 ; --Index)
 	{
-		//UE_LOG(LogTemp, Log, TEXT("[UPostProcessCallSubsystem] Tick %s"),*OverrideTasks[Index]->GetEffectID().ToString());
+		//UE_LOG(LogTemp, Log, TEXT("[UPostProcessCallSubsystem] Tick %s"),*TransientTasks[Index]->GetEffectID().ToString());
 		if (TransientTasks[Index]->Tick(PCM, DeltaTime) == PostProcessTaskTickResult::Finish)
 		{
-			//UE_LOG(LogTemp, Log, TEXT("[UPostProcessCallSubsystem] Finish %s"),*OverrideTasks[Index]->GetEffectID().ToString());
+			//UE_LOG(LogTemp, Log, TEXT("[UPostProcessCallSubsystem] Finish %s"),*TransientTasks[Index]->GetEffectID().ToString());
 			TransientTasks.RemoveAt(Index);
 		}
 	}
