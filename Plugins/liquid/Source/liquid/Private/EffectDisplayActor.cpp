@@ -14,7 +14,12 @@ AEffectDisplayActor::AEffectDisplayActor()
 	RotationRoot = CreateDefaultSubobject<USceneComponent>(TEXT("RotationRoot"));
 	RotationRoot->SetupAttachment(RootComponent);
 	Playlist.Reserve(PlaylistReserveCapacity);
+
+#if EFFECT_DISPLAY_ENABLED
 	PrimaryActorTick.bCanEverTick = true;
+#else
+	PrimaryActorTick.bCanEverTick = false;
+#endif
 }
 
 #if EFFECT_DISPLAY_ENABLED
@@ -134,6 +139,10 @@ void AEffectDisplayActor::StopCurrentPlayEffect()
 
 bool AEffectDisplayActor::PlayNext()
 {
+	if (Playlist.IsEmpty())
+	{
+		return false;
+	}
 	CurrentPlayIndex++;
 	if(CurrentPlayIndex >= Playlist.Num())
 	{
@@ -176,7 +185,7 @@ bool AEffectDisplayActor::IsPlaying() const
 		return false;
 	}
 		
-	return NiagaraComponent->IsActive() || CurrentPlayIndex > 0;
+	return NiagaraComponent->IsActive() || CurrentPlayIndex != InvalidPlayIndex;
 }
 
 void AEffectDisplayActor::RotationNiagaraSystem(float DeltaTime)const
