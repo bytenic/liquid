@@ -12,7 +12,7 @@ FTransientPostProcessTask::FTransientPostProcessTask(const FName& EffectID,const
 
 FString FTransientPostProcessTask::GetReferencerName() const
 {
-	return TEXT("PostProcessOverrideTask");
+	return TEXT("TransientPostProcessTask");
 }
 
 void FTransientPostProcessTask::AddReferencedObjects(FReferenceCollector& Collector)
