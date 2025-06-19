@@ -6,6 +6,7 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "Engine/EngineTypes.h"
 #include "Engine/Scene.h"
+#include "RuntimeAssetPtr.h"
 #include "PostProcessCallSubsystem.generated.h"
 
 /**
@@ -30,7 +31,7 @@ struct FTransientPostProcessConfig : public FTableRowBase
 {
 	GENERATED_BODY()	
 	UPROPERTY(EditAnywhere, BlueprintReadOnly,meta=(ToolTip="適用するMaterial ※PostProcessMaterial以外を設定しないこと"))
-	TObjectPtr<UMaterialInstance> Material{nullptr}; //TODO: ハードリファレンスになると初期化時にすべてLoadされるためTSoftObjectPtrへの移行
+	TSoftObjectPtr<UMaterialInstance> Material{nullptr};
 
 	UPROPERTY(EditAnywhere,BlueprintReadOnly, meta=(ToolTip="適用順序のプライオリティ(低いほど先に実行されます)"))
 	int32 Priority = 0;
@@ -76,8 +77,8 @@ public:
 	/** GC参照対象を追加 */
 	virtual void AddReferencedObjects(FReferenceCollector& Collector) override;
 	/** タスクを初期化・有効化 */
-	bool Activate();
-	bool Activate(const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction);
+	bool Activate(UMaterialInstance* OwnerMaterial);
+	bool Activate(UMaterialInstance* OwnerMaterial, const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction);
 	/**
 	 * タスクの更新処理
 	 * @param CameraManager カメラマネージャへの参照
@@ -91,7 +92,7 @@ public:
 	bool IsScheduleDeleteTask(float CurrentFrameDeltaTime) const;
 
 private:
-	bool CreateMaterialInstanceDynamic();
+	bool CreateMaterialInstanceDynamic(UMaterialInstance* OwnerMaterial);
 	void Cleanup();
 	void InitializeOverrideSettings();
 private:
@@ -135,13 +136,26 @@ private:
 	
 	/** WorldのPostTick時に呼び出されるタスク更新関数 */
 	void OnWorldPostActorTick(UWorld* InWorld, ELevelTick InType,float DeltaTime);
+	UMaterialInstance* GetLoadedMaterial(const FName& EffectID) const;
+
+	void LoadAsyncUnloadMaterial(const FName& EffectID);
+private:
+	
 	/** ポストプロセス設定を格納したデータテーブル ※アセットのパスはTableAssetPathでハードコーディングされています*/
 	UPROPERTY()
 	TObjectPtr<UDataTable> PostProcessTable{nullptr};
-	
+
+	UPROPERTY()
+	TMap<FName, TObjectPtr<UMaterialInstance>> CachedMaterials;
+
+	/** EffectID → 非同期ロードハンドラ (GC 不要なので UPROPERTY にはしない) */
+	//TMap<FName, TRuntimeAssetPtr<UMaterialInstance>> RuntimePtrs;
+	TArray<TSharedPtr<TRuntimeAssetPtr<UMaterialInstance>>> RuntimePtrs;
 	TArray<TUniquePtr<FTransientPostProcessTask>> TransientTasks;
 	FDelegateHandle PostActorTickHandle;
-	
+
+	//TRuntimeAssetPtr<UMaterialInstance> LoadingHandlePtr{};
+	TQueue<FName> UnloadMaterialIDQueue{};
 	static constexpr TCHAR TableAssetPath[] = TEXT("/liquid/post_process/sample_table");
 	static constexpr int32 TransientPostProcessCapacity = 16;
 };

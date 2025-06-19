@@ -47,14 +47,14 @@ public:
 			LoadingHandle->CancelHandle();
 		}
 		LoadingHandle.Reset();
-		CachedAssetPtr.Reset();
-		SoftPtr.Reset();
+		//CachedAssetPtr.Reset();
+		//SoftPtr.Reset();
 	}
 	bool IsLoaded()const{return CachedAssetPtr.IsValid();}
 	bool IsLoading()const{return LoadingHandle.IsValid() && !LoadingHandle->HasLoadCompleted();}
 
 	void LoadAsync(TFunction<void(AssetType*)> Callback = nullptr,
-				   int32 Priority = FStreamableManager::AsyncLoadHighPriority)
+				   int32 Priority = FStreamableManager::DefaultAsyncLoadPriority)
 	{
 		if (SoftPtr.IsNull())
 		{
@@ -84,7 +84,7 @@ public:
 		FStreamableManager& Manager = UAssetManager::GetStreamableManager();
 		LoadingHandle = Manager.RequestAsyncLoad(
 			SoftPtr.ToSoftObjectPath(),
-			FStreamableDelegate::CreateWeakLambda(this, [this]()
+			FStreamableDelegate::CreateLambda([this, Callback]()
 			{
 				this->OnAsyncLoadCompleted();
 			}),
@@ -100,6 +100,12 @@ public:
 private:
 	void OnAsyncLoadCompleted()
 	{
+		if (SoftPtr.IsNull())
+		{
+			UE_LOG(LogTemp, Warning,
+				   TEXT("[TRuntimeAssetPtr] OnAsyncLoadCompleted called after Reset/Cancellation – ignored."));
+			return;
+		}
 		auto Result = SoftPtr.Get();
 		bool IsSuccessful = SoftPtr.IsValid() && Result != nullptr;
 		if (!IsSuccessful)
@@ -112,7 +118,7 @@ private:
 		CachedAssetPtr = IsSuccessful ? Result : nullptr;
 		//ロードが終了したので破棄
 		LoadingHandle.Reset();
-		if (LoadedCallback)
+		if (Result && LoadedCallback)
 		{
 			LoadedCallback(CachedAssetPtr.Get());
 		}

@@ -20,9 +20,9 @@ void FTransientPostProcessTask::AddReferencedObjects(FReferenceCollector& Collec
 	Collector.AddReferencedObject(MaterialInstanceDynamic);
 }
 
-bool FTransientPostProcessTask::Activate()
+bool FTransientPostProcessTask::Activate(UMaterialInstance* OwnerMaterial)
 {
-	if (!CreateMaterialInstanceDynamic())
+	if (!CreateMaterialInstanceDynamic(OwnerMaterial))
 	{
 		return false;
 	}
@@ -30,9 +30,9 @@ bool FTransientPostProcessTask::Activate()
 	return true;
 }
 
-bool FTransientPostProcessTask::Activate(const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction)
+bool FTransientPostProcessTask::Activate(UMaterialInstance* OwnerMaterial, const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction)
 {
-	if (!CreateMaterialInstanceDynamic())
+	if (!CreateMaterialInstanceDynamic(OwnerMaterial))
 	{
 		return false;
 	}
@@ -87,14 +87,9 @@ bool FTransientPostProcessTask::IsScheduleDeleteTask(float CurrentFrameDeltaTime
 	return ElapsedTime + CurrentFrameDeltaTime >= PostProcessConfig->Duration;
 }
 
-bool FTransientPostProcessTask::CreateMaterialInstanceDynamic()
+bool FTransientPostProcessTask::CreateMaterialInstanceDynamic(UMaterialInstance* OwnerMaterial)
 {
-	if(!PostProcessConfig->Material)
-	{
-		UE_LOG(LogTemp, Error, TEXT("[FPostProcessOverrideTask] Material is nullptr "));
-		return false;
-	}
-	MaterialInstanceDynamic = UMaterialInstanceDynamic::Create(PostProcessConfig->Material,Owner);
+	MaterialInstanceDynamic = UMaterialInstanceDynamic::Create(OwnerMaterial,Owner);
 	if (!MaterialInstanceDynamic)
 	{
 		UE_LOG(LogTemp, Error, TEXT("[FPostProcessOverrideTask] Failed Create Material Instance Dynamic"));
@@ -132,10 +127,58 @@ void UPostProcessCallSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	TransientTasks.Reserve(TransientPostProcessCapacity);
 	if(!PostProcessTable)
 	{
-		UE_LOG(LogTemp, Error, TEXT("[UPostProcessCallSubsystem] Data Table Load Failed"));	
+		UE_LOG(LogTemp, Error, TEXT("[UPostProcessCallSubsystem] Data Table Load Failed"));
+		return;
 	}
+	
+	CachedMaterials.Reserve(32);
 	PostActorTickHandle = FWorldDelegates::OnWorldPostActorTick.AddUObject(
 		this, &UPostProcessCallSubsystem::OnWorldPostActorTick);
+
+	TArray<FName> RowNames = PostProcessTable->GetRowNames();
+	RuntimePtrs.Reserve(RowNames.Num());
+	for (auto& Name : RowNames)
+	{
+		UnloadMaterialIDQueue.Enqueue(MoveTemp(Name));
+	}
+	FName FirstLoadID;
+	UnloadMaterialIDQueue.Dequeue(FirstLoadID);
+	LoadAsyncUnloadMaterial(FirstLoadID);
+}
+
+void UPostProcessCallSubsystem::LoadAsyncUnloadMaterial(const FName& EffectID)
+{
+	const FTransientPostProcessConfig* Row = PostProcessTable->FindRow<FTransientPostProcessConfig>(EffectID, TEXT("UPostProcessCallSubsystem::Initialize"));
+	if (!Row || Row->Material.IsNull())
+	{
+		UE_LOG(LogTemp, Error,
+		TEXT("[UPostProcessCallSubsystem::Initialize] Row %s has null Material"), *EffectID.ToString());
+		return;;
+	}
+	auto& Ptr = RuntimePtrs.Emplace_GetRef(MakeShared<TRuntimeAssetPtr<UMaterialInstance>>());
+	Ptr->SetSoftPtr(Row->Material);
+	Ptr->LoadAsync([this, EffectID](UMaterialInstance* LoadedMaterial)
+	{
+		if (LoadedMaterial)
+		{
+			CachedMaterials.Add(EffectID, LoadedMaterial);
+			UE_LOG(LogTemp, Log,
+				   TEXT("[UPostProcessCallSubsystem::Initialize] Loaded PostProcess Material for %s"), *EffectID.ToString());
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error,
+				   TEXT("[UPostProcessCallSubsystem::Initialize] Failed to load PostProcess Material for %s"),
+				   *EffectID.ToString());
+		}
+
+		if (!UnloadMaterialIDQueue.IsEmpty())
+		{
+			FName NextID;
+			UnloadMaterialIDQueue.Dequeue(NextID);
+			LoadAsyncUnloadMaterial(NextID);
+		}
+	}, FStreamableManager::DefaultAsyncLoadPriority);
 }
 
 /**
@@ -226,8 +269,16 @@ bool UPostProcessCallSubsystem::IsPlayingTransientPostProcess(const FName& Effec
  */
 bool UPostProcessCallSubsystem::BeginTransientPostProcess(const FName& EffectID, const FTransientPostProcessConfig* Config)
 {
+	UMaterialInstance* LoadedMat = GetLoadedMaterial(EffectID);
+	if (!LoadedMat)
+	{
+		UE_LOG(LogTemp, Error,
+			TEXT("[UPostProcessCallSubsystem::BeginTransientPostProcess] Material for %s is not loaded yet. PostProcess call aborted."),
+			*EffectID.ToString());
+		return false;
+	}
 	auto InitTask =	MakeUnique<FTransientPostProcessTask>(EffectID, Config, this);
-	if (InitTask->Activate())
+	if (InitTask->Activate(LoadedMat))
 	{
 		TransientTasks.Emplace(MoveTemp(InitTask));
 		//memo: 各TaskのTickは降順に実行されるのでここでも降順に実行することで結果的に昇順のタスク実行になるようにする
@@ -243,8 +294,17 @@ bool UPostProcessCallSubsystem::BeginTransientPostProcess(const FName& EffectID,
 bool UPostProcessCallSubsystem::BeginTransientPostProcess(const FName& EffectID, const FTransientPostProcessConfig* Config,
 	const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction)
 {
+	UMaterialInstance* LoadedMat = GetLoadedMaterial(EffectID);
+	if (!LoadedMat)
+	{
+		UE_LOG(LogTemp, Error,
+			TEXT("[UPostProcessCallSubsystem::BeginTransientPostProcess] Material for %s is not loaded yet. PostProcess call aborted."),
+			*EffectID.ToString());
+		return false;
+	}
+	
 	auto InitTask =	MakeUnique<FTransientPostProcessTask>(EffectID, Config, this);
-	if (InitTask->Activate(InitFunction))
+	if (InitTask->Activate(LoadedMat, InitFunction))
 	{
 		TransientTasks.Emplace(MoveTemp(InitTask));
 		//memo: 各TaskのTickは降順に実行されるのでここでも降順に実行することで結果的に昇順のタスク実行になるようにする
@@ -295,3 +355,11 @@ void UPostProcessCallSubsystem::OnWorldPostActorTick(UWorld* InWorld, ELevelTick
 		}
 	}
 }
+
+UMaterialInstance* UPostProcessCallSubsystem::GetLoadedMaterial(const FName& EffectID) const
+{
+	const TObjectPtr<UMaterialInstance>* Found = CachedMaterials.Find(EffectID);
+	return Found ? Found->Get() : nullptr;
+}
+
+
