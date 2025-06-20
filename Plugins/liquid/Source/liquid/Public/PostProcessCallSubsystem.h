@@ -4,9 +4,8 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
-#include "Engine/EngineTypes.h"
+#include "Engine/StreamableManager.h"
 #include "Engine/Scene.h"
-#include "RuntimeAssetPtr.h"
 #include "PostProcessCallSubsystem.generated.h"
 
 /**
@@ -193,9 +192,7 @@ private:
 	TSharedPtr<FStreamableHandle> CurrentLoadingHandle{};
 	static constexpr TCHAR TableAssetPath[] = TEXT("/liquid/post_process/sample_table");
 	static constexpr int32 TransientPostProcessCapacity = 16;
-
-#if UE_BUILD_DEBUG || UE_BUILD_DEVELOPMENT
+	
 	TMap<FName, int32> LoadRetryCounts;
-	static constexpr int32 MaxLoadRetryCount = 3;
-#endif
+	static constexpr int32 MaxLoadRetryCount = 8;
 };

@@ -170,28 +170,18 @@ void UPostProcessCallSubsystem::LoadPostProcessMaterialAsync(const FName& Effect
 		FStreamableDelegate::CreateLambda([this,Row, EffectID]()
 		{
 			UMaterialInstance* LoadedMaterial = Row->Material.Get();
-			const bool bSucceeded = Row->Material.IsValid() && LoadedMaterial != nullptr;
-			if (!bSucceeded)
+			bool IsSuccessful = Row->Material.IsValid() && LoadedMaterial != nullptr;
+			if (!IsSuccessful)
 			{
-#if UE_BUILD_DEBUG || UE_BUILD_DEVELOPMENT
 				int32& RetryCount = LoadRetryCounts.FindOrAdd(EffectID);
 				if (++RetryCount <= MaxLoadRetryCount)
 				{
 					UE_LOG(LogTemp, Warning,
 						TEXT("[PostProcessCallSubsystem] Retry %d / %d : %s"),
 						RetryCount, MaxLoadRetryCount, *EffectID.ToString());
-#endif
 					LoadPostProcessMaterialAsync(EffectID);
 					return;
 				}
-			}
-			//auto LoadedMaterial = Row->Material.Get();
-			bool IsSuccessful = Row->Material.IsValid() && LoadedMaterial != nullptr;
-			if (!IsSuccessful)
-			{
-				UE_LOG(LogTemp, Error,
-				   TEXT("[TRuntimeAssetPtr] Failed to load asset: %s"),
-				   *Row->Material.ToString());
 			}
 			if (LoadedMaterial)
 			{
@@ -371,8 +361,8 @@ void UPostProcessCallSubsystem::OnWorldPostActorTick(UWorld* InWorld, ELevelTick
 	{
 		return;
 	}
-	auto PCM = UGameplayStatics::GetPlayerCameraManager(CurrentWorld,0);
-	if (!PCM)
+	auto PlayerCameraManager = UGameplayStatics::GetPlayerCameraManager(CurrentWorld,0);
+	if (!PlayerCameraManager)
 	{
 		//Editorでもここに来るのでVerboseにする
 		UE_LOG(LogTemp, Verbose, TEXT("[UPostProcessCallSubsystem] CameraManager is nullptr"));
@@ -387,7 +377,7 @@ void UPostProcessCallSubsystem::OnWorldPostActorTick(UWorld* InWorld, ELevelTick
 	for (int32 Index = NumTask -1 ; Index >= 0 ; --Index)
 	{
 		//UE_LOG(LogTemp, Log, TEXT("[UPostProcessCallSubsystem] Tick %s"),*TransientTasks[Index]->GetEffectID().ToString());
-		if (TransientTasks[Index]->Tick(PCM, DeltaTime) == PostProcessTaskTickResult::Finish)
+		if (TransientTasks[Index]->Tick(PlayerCameraManager, DeltaTime) == PostProcessTaskTickResult::Finish)
 		{
 			//UE_LOG(LogTemp, Log, TEXT("[UPostProcessCallSubsystem] Finish %s"),*TransientTasks[Index]->GetEffectID().ToString());
 			TransientTasks.RemoveAt(Index);
