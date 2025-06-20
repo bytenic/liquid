@@ -3,6 +3,8 @@
 
 #include "PostProcessCallSubsystem.h"
 #include "Kismet/GameplayStatics.h"
+#include "Engine/AssetManager.h"
+#include "Engine/StreamableManager.h"
 
 FTransientPostProcessTask::FTransientPostProcessTask(const FName& EffectID,const FTransientPostProcessConfig* ConfigPtr, UPostProcessCallSubsystem* Owner)
 	: PostProcessConfig(ConfigPtr), Owner(Owner), EffectID(EffectID)
@@ -131,12 +133,12 @@ void UPostProcessCallSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		return;
 	}
 	
-	CachedMaterials.Reserve(32);
+	
 	PostActorTickHandle = FWorldDelegates::OnWorldPostActorTick.AddUObject(
 		this, &UPostProcessCallSubsystem::OnWorldPostActorTick);
 
 	TArray<FName> RowNames = PostProcessTable->GetRowNames();
-	RuntimePtrs.Reserve(RowNames.Num());
+	CachedMaterials.Reserve(RowNames.Num());
 	for (auto& Name : RowNames)
 	{
 		UnloadMaterialIDQueue.Enqueue(MoveTemp(Name));
@@ -155,30 +157,61 @@ void UPostProcessCallSubsystem::LoadAsyncUnloadMaterial(const FName& EffectID)
 		TEXT("[UPostProcessCallSubsystem::Initialize] Row %s has null Material"), *EffectID.ToString());
 		return;;
 	}
-	auto& Ptr = RuntimePtrs.Emplace_GetRef(MakeShared<TRuntimeAssetPtr<UMaterialInstance>>());
-	Ptr->SetSoftPtr(Row->Material);
-	Ptr->LoadAsync([this, EffectID](UMaterialInstance* LoadedMaterial)
-	{
-		if (LoadedMaterial)
+
+	FStreamableManager& Manager = UAssetManager::GetStreamableManager();
+	CurrentLoadingHandle = Manager.RequestAsyncLoad(
+	Row->Material.ToSoftObjectPath(),
+		FStreamableDelegate::CreateLambda([this,Row, EffectID]()
 		{
-			CachedMaterials.Add(EffectID, LoadedMaterial);
-			UE_LOG(LogTemp, Log,
+			UMaterialInstance* LoadedMaterial = Row->Material.Get();
+			const bool bSucceeded = Row->Material.IsValid() && LoadedMaterial != nullptr;
+			if (!bSucceeded)
+			{
+#if UE_BUILD_DEBUG || UE_BUILD_DEVELOPMENT
+				int32& RetryCount = LoadRetryCounts.FindOrAdd(EffectID);
+				if (++RetryCount <= MaxLoadRetryCount)
+				{
+					UE_LOG(LogTemp, Warning,
+						TEXT("[PostProcessCallSubsystem] Retry %d / %d : %s"),
+						RetryCount, MaxLoadRetryCount, *EffectID.ToString());
+#endif
+					LoadAsyncUnloadMaterial(EffectID);
+					return;
+				}
+			}
+			//auto LoadedMaterial = Row->Material.Get();
+			bool IsSuccessful = Row->Material.IsValid() && LoadedMaterial != nullptr;
+			if (!IsSuccessful)
+			{
+				UE_LOG(LogTemp, Error,
+				   TEXT("[TRuntimeAssetPtr] Failed to load asset: %s"),
+				   *Row->Material.ToString());
+			}
+			if (LoadedMaterial)
+			{
+				CachedMaterials.Add(EffectID, LoadedMaterial);
+				UE_LOG(LogTemp, Log,
 				   TEXT("[UPostProcessCallSubsystem::Initialize] Loaded PostProcess Material for %s"), *EffectID.ToString());
-		}
-		else
-		{
-			UE_LOG(LogTemp, Error,
+			}
+			else
+			{
+				UE_LOG(LogTemp, Error,
 				   TEXT("[UPostProcessCallSubsystem::Initialize] Failed to load PostProcess Material for %s"),
 				   *EffectID.ToString());
-		}
+			}
 
-		if (!UnloadMaterialIDQueue.IsEmpty())
-		{
-			FName NextID;
-			UnloadMaterialIDQueue.Dequeue(NextID);
-			LoadAsyncUnloadMaterial(NextID);
-		}
-	}, FStreamableManager::DefaultAsyncLoadPriority);
+			if (!UnloadMaterialIDQueue.IsEmpty())
+			{
+				FName NextID;
+				UnloadMaterialIDQueue.Dequeue(NextID);
+				LoadAsyncUnloadMaterial(NextID);
+			}
+		}));
+}
+
+float UPostProcessCallSubsystem::GetEffectiveDeltaSeconds(const UWorld* InWorld)
+{
+	return (InWorld != nullptr)? InWorld->GetDeltaSeconds() : FApp::GetDeltaTime();   // World が分かるならその Δt: FApp::GetDeltaTime();
 }
 
 /**
@@ -186,6 +219,10 @@ void UPostProcessCallSubsystem::LoadAsyncUnloadMaterial(const FName& EffectID)
  */
 void UPostProcessCallSubsystem::Deinitialize()
 {
+	if (CurrentLoadingHandle.IsValid())
+	{
+		CurrentLoadingHandle->CancelHandle();
+	}
 	FWorldDelegates::OnWorldPostActorTick.Remove(PostActorTickHandle);
 }
 
@@ -238,7 +275,7 @@ bool UPostProcessCallSubsystem::PlayTransientPostProcess(const FName& EffectID,
 	return false;
 }
 
-bool UPostProcessCallSubsystem::IsPlayingTransientPostProcess(const FName& EffectID, bool IsCalledOutsidePostTick) const
+bool UPostProcessCallSubsystem::IsPlayingTransientPostProcess(const FName& EffectID, const UWorld* InWorld) const
 {
 	auto ExistTask = TransientTasks.FindByPredicate(
 		[&EffectID](const TUniquePtr<FTransientPostProcessTask>& Task)
@@ -251,12 +288,8 @@ bool UPostProcessCallSubsystem::IsPlayingTransientPostProcess(const FName& Effec
 	}
 	if (ExistTask->IsValid())
 	{
-		if (IsCalledOutsidePostTick)
-		{
-			float Delta = UGameplayStatics::GetWorldDeltaSeconds(GetWorld());
-			return !(*ExistTask)->IsScheduleDeleteTask(Delta);
-		}
-		return true;
+		float Delta = GetEffectiveDeltaSeconds(InWorld);
+		return !(*ExistTask)->IsScheduleDeleteTask(Delta);
 	}
 	return false;
 }

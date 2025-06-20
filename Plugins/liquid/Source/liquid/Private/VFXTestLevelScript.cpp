@@ -25,5 +25,5 @@ bool AVFXTestLevelScript::IsExecuteAdditionalPostEffect(const FName EffectID)
 	auto CallSystem = GetWorld()->GetSubsystem<UPostProcessCallSubsystem>();
 	if (!CallSystem)
 		return false;
-	return CallSystem->IsPlayingTransientPostProcess(EffectID);
+	return CallSystem->IsPlayingTransientPostProcess(EffectID,GetWorld());
 }

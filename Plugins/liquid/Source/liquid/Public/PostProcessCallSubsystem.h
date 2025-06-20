@@ -127,7 +127,7 @@ public:
 	bool PlayTransientPostProcess(const FName& EffectID);
 	bool PlayTransientPostProcess(const FName& EffectID, const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction);
 
-	bool IsPlayingTransientPostProcess(const FName& EffectID, bool IsCalledOutsidePostTick = false) const;
+	bool IsPlayingTransientPostProcess(const FName& EffectID, const UWorld* InWorld) const;
 	
 private:
 	/** エフェクトの適用開始 */
@@ -139,6 +139,7 @@ private:
 	UMaterialInstance* GetLoadedMaterial(const FName& EffectID) const;
 
 	void LoadAsyncUnloadMaterial(const FName& EffectID);
+	static float GetEffectiveDeltaSeconds(const UWorld* InWorld);
 private:
 	
 	/** ポストプロセス設定を格納したデータテーブル ※アセットのパスはTableAssetPathでハードコーディングされています*/
@@ -147,15 +148,17 @@ private:
 
 	UPROPERTY()
 	TMap<FName, TObjectPtr<UMaterialInstance>> CachedMaterials;
-
-	/** EffectID → 非同期ロードハンドラ (GC 不要なので UPROPERTY にはしない) */
-	//TMap<FName, TRuntimeAssetPtr<UMaterialInstance>> RuntimePtrs;
-	TArray<TSharedPtr<TRuntimeAssetPtr<UMaterialInstance>>> RuntimePtrs;
 	TArray<TUniquePtr<FTransientPostProcessTask>> TransientTasks;
+	
 	FDelegateHandle PostActorTickHandle;
-
-	//TRuntimeAssetPtr<UMaterialInstance> LoadingHandlePtr{};
+	
 	TQueue<FName> UnloadMaterialIDQueue{};
+	TSharedPtr<FStreamableHandle> CurrentLoadingHandle{};
 	static constexpr TCHAR TableAssetPath[] = TEXT("/liquid/post_process/sample_table");
 	static constexpr int32 TransientPostProcessCapacity = 16;
+
+#if UE_BUILD_DEBUG || UE_BUILD_DEVELOPMENT
+	TMap<FName, int32> LoadRetryCounts;
+	static constexpr int32 MaxLoadRetryCount = 3;
+#endif
 };
