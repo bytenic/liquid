@@ -104,7 +104,7 @@ private:
 	TObjectPtr<UMaterialInstanceDynamic> MaterialInstanceDynamic{nullptr};
 	FPostProcessSettings OverrideSettings{};
 	FName EffectID{}; //DataTable上のID
-	float ElapsedTime = .0f;
+	float ElapsedTime = .0f; //秒
 };
 
 /**
@@ -138,7 +138,7 @@ private:
 	void OnWorldPostActorTick(UWorld* InWorld, ELevelTick InType,float DeltaTime);
 	UMaterialInstance* GetLoadedMaterial(const FName& EffectID) const;
 
-	void LoadAsyncUnloadMaterial(const FName& EffectID);
+	void LoadPostProcessMaterialAsync(const FName& EffectID);
 	static float GetEffectiveDeltaSeconds(const UWorld* InWorld);
 private:
 	
@@ -152,7 +152,7 @@ private:
 	
 	FDelegateHandle PostActorTickHandle;
 	
-	TQueue<FName> UnloadMaterialIDQueue{};
+	TQueue<FName> LoadMaterialQueue{};
 	TSharedPtr<FStreamableHandle> CurrentLoadingHandle{};
 	static constexpr TCHAR TableAssetPath[] = TEXT("/liquid/post_process/sample_table");
 	static constexpr int32 TransientPostProcessCapacity = 16;

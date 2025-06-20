@@ -73,6 +73,7 @@ PostProcessTaskTickResult FTransientPostProcessTask::Tick(APlayerCameraManager* 
 	{
 		CurrentWeight = PostProcessConfig->NormalizedWeightCurve->GetFloatValue(NormalizedElapsedTime);
 	}
+	CurrentWeight = FMath::Clamp(CurrentWeight, 0.0f, 1.0f);
 	CameraManager->AddCachedPPBlend(OverrideSettings, CurrentWeight, VTBlendOrder_Override);
 	
 	if ( ElapsedTime >= PostProcessConfig->Duration)
@@ -102,6 +103,7 @@ bool FTransientPostProcessTask::CreateMaterialInstanceDynamic(UMaterialInstance*
 
 void FTransientPostProcessTask::Cleanup()
 {
+	OverrideSettings.WeightedBlendables.Array.Empty();
 	// MID を即座に GC 対象へ
 	if (MaterialInstanceDynamic)
 	{
@@ -141,14 +143,14 @@ void UPostProcessCallSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	CachedMaterials.Reserve(RowNames.Num());
 	for (auto& Name : RowNames)
 	{
-		UnloadMaterialIDQueue.Enqueue(MoveTemp(Name));
+		LoadMaterialQueue.Enqueue(MoveTemp(Name));
 	}
 	FName FirstLoadID;
-	UnloadMaterialIDQueue.Dequeue(FirstLoadID);
-	LoadAsyncUnloadMaterial(FirstLoadID);
+	LoadMaterialQueue.Dequeue(FirstLoadID);
+	LoadPostProcessMaterialAsync(FirstLoadID);
 }
 
-void UPostProcessCallSubsystem::LoadAsyncUnloadMaterial(const FName& EffectID)
+void UPostProcessCallSubsystem::LoadPostProcessMaterialAsync(const FName& EffectID)
 {
 	const FTransientPostProcessConfig* Row = PostProcessTable->FindRow<FTransientPostProcessConfig>(EffectID, TEXT("UPostProcessCallSubsystem::Initialize"));
 	if (!Row || Row->Material.IsNull())
@@ -175,7 +177,7 @@ void UPostProcessCallSubsystem::LoadAsyncUnloadMaterial(const FName& EffectID)
 						TEXT("[PostProcessCallSubsystem] Retry %d / %d : %s"),
 						RetryCount, MaxLoadRetryCount, *EffectID.ToString());
 #endif
-					LoadAsyncUnloadMaterial(EffectID);
+					LoadPostProcessMaterialAsync(EffectID);
 					return;
 				}
 			}
@@ -200,11 +202,11 @@ void UPostProcessCallSubsystem::LoadAsyncUnloadMaterial(const FName& EffectID)
 				   *EffectID.ToString());
 			}
 
-			if (!UnloadMaterialIDQueue.IsEmpty())
+			if (!LoadMaterialQueue.IsEmpty())
 			{
 				FName NextID;
-				UnloadMaterialIDQueue.Dequeue(NextID);
-				LoadAsyncUnloadMaterial(NextID);
+				LoadMaterialQueue.Dequeue(NextID);
+				LoadPostProcessMaterialAsync(NextID);
 			}
 		}));
 }
