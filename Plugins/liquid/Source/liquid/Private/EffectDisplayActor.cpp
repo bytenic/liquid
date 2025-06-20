@@ -13,6 +13,8 @@ AEffectDisplayActor::AEffectDisplayActor()
 	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 	RotationRoot = CreateDefaultSubobject<USceneComponent>(TEXT("RotationRoot"));
 	RotationRoot->SetupAttachment(RootComponent);
+	PlaceRoot = CreateDefaultSubobject<USceneComponent>(TEXT("PlaceRoot"));
+	PlaceRoot->SetupAttachment(RotationRoot);
 	Playlist.Reserve(PlaylistReserveCapacity);
 
 #if EFFECT_DISPLAY_ENABLED
@@ -60,12 +62,15 @@ void AEffectDisplayActor::LoadAdditionalNiagaraSystems()
 void AEffectDisplayActor::BeginPlay()
 {
 	Super::BeginPlay();
-	const FVector Offset = GetActorForwardVector() * EffectPlaceOffset.X
-						+ GetActorRightVector() * EffectPlaceOffset.Y
-						+ GetActorUpVector() * EffectPlaceOffset.Z;
-	const FVector Location = GetActorLocation() + Offset;
-	RotationRoot->SetWorldLocation(GetActorLocation() + Offset);
+	const FVector Offset = GetActorForwardVector() * PlaceOffset.X
+						+ GetActorRightVector() * PlaceOffset.Y
+						+ GetActorUpVector() * PlaceOffset.Z;
+	const FVector RotateLocation = GetActorLocation() + Offset;
+	RotationRoot->SetWorldLocation(RotateLocation);
 
+	const FVector Radius(RotationRadius,.0,.0);
+	PlaceRoot->SetWorldLocation(RotateLocation + Radius);
+	
 	//初期値が無効になっているものがあれば取り除く
 	Playlist.RemoveAll([](const TObjectPtr<UNiagaraSystem>& System)
 	{
@@ -160,7 +165,7 @@ bool AEffectDisplayActor::PlayNext()
 	UNiagaraSystem* PlaySystem = Playlist[CurrentPlayIndex];
 	NiagaraComponent = UNiagaraFunctionLibrary::SpawnSystemAttached(
 		PlaySystem,
-		RotationRoot,
+		PlaceRoot,
 		NAME_None,
 		FVector::Zero(),
 		FRotator::ZeroRotator,

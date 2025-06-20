@@ -43,7 +43,9 @@ private:
 	UPROPERTY(EditAnywhere, meta=(Tooltip = "PlayListに追加するNiagaraフォルダのパス"))
 	FString AdditionalNiagaraFolderPath{};
 	UPROPERTY(EditAnywhere, meta=(Tooltip = "再生位置のオフセット"))
-	FVector EffectPlaceOffset{200.0,.0,100.0};
+	FVector PlaceOffset{200.0,.0,100.0};
+	UPROPERTY(EditAnywhere, meta=(Tooltip = "回転時の半径"))
+	float RotationRadius{.0f};
 	UPROPERTY(EditAnywhere, meta=(Tooltip = "1秒あたりの回転角度(度) ※NiagaraSystemのLocalSpaceをONにしないと回転しません"))
 	float RotateSpeed{.0f};
 	UPROPERTY(EditAnywhere, meta=(Tooltip = "1つあたりのエフェクトの再生時間"))
@@ -55,6 +57,8 @@ private:
 	
 	UPROPERTY()
 	TObjectPtr<USceneComponent> RotationRoot{};	//NiagaraComponent自身を回転させてもSystemが回らなかったので親子関係で回転させる
+	UPROPERTY()
+	TObjectPtr<USceneComponent> PlaceRoot{};	//実際のNiagaraComponent配置位置(RotationRadius)
 	UPROPERTY()
 	TObjectPtr<UNiagaraComponent> NiagaraComponent{}; //再生中のNiagara
 	int32 CurrentPlayIndex{-1}; //再生中のPlaylistArray Index
