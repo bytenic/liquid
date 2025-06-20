@@ -34,7 +34,6 @@ protected:
 private:
 	void StopCurrentPlayEffect();
 	bool PlayNext();
-	bool IsPlaying() const;
 	void RotationNiagaraSystem(float DeltaTime)const ;
 	void BeginLoadAsync();
 	void LoadNiagaraSystemAsync();

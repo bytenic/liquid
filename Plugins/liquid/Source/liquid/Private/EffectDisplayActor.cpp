@@ -71,24 +71,27 @@ void AEffectDisplayActor::LoadNiagaraSystemAsync()
 	}
 	FStreamableManager& Manager = UAssetManager::GetStreamableManager();
 	auto& SoftPtr = Playlist[CurrentLoadingIndex];
+	const TWeakObjectPtr<AEffectDisplayActor> Self(this);
 	CurrentLoadingHandle = Manager.RequestAsyncLoad(
 	SoftPtr.ToSoftObjectPath(),
-		FStreamableDelegate::CreateLambda([this]()
+		FStreamableDelegate::CreateLambda([Self]()
 		{
-			auto& SoftPtr = Playlist[CurrentLoadingIndex];
-			UNiagaraSystem* LoadedNiagara =  Playlist[CurrentLoadingIndex].Get();
-			const bool IsSuccess = Playlist[CurrentLoadingIndex].IsValid() && LoadedNiagara != nullptr;
+			if (!Self.IsValid()) { return; }
+			AEffectDisplayActor& Actor = *Self.Get();
+			auto& SoftPtr = Actor.Playlist[Actor.CurrentLoadingIndex];
+			UNiagaraSystem* LoadedNiagara =  Actor.Playlist[Actor.CurrentLoadingIndex].Get();
+			const bool IsSuccess = Actor.Playlist[Actor.CurrentLoadingIndex].IsValid() && LoadedNiagara != nullptr;
 			if (!IsSuccess)
 			{
 				UE_LOG(LogTemp, Warning,
 				TEXT("[AEffectDisplayActor] Retry Load : %s"), *SoftPtr.ToSoftObjectPath().ToString());
-				LoadNiagaraSystemAsync();
+				Actor.LoadNiagaraSystemAsync();
 				return;
 			}
 			
 			if (LoadedNiagara)
 			{
-				LoadedPlayList.Add(LoadedNiagara);
+				Actor.LoadedPlayList.Add(LoadedNiagara);
 				UE_LOG(LogTemp, Log,
 				   TEXT("[AEffectDisplayActor::LoadNiagaraSystemAsync] Loaded Niagara %s"), *SoftPtr.ToSoftObjectPath().ToString());
 			}
@@ -98,10 +101,10 @@ void AEffectDisplayActor::LoadNiagaraSystemAsync()
 				   TEXT("[AEffectDisplayActor::LoadNiagaraSystemAsync] Failed to load Niagara %s"),
 				   *SoftPtr.ToSoftObjectPath().ToString());
 			}
-			CurrentLoadingIndex++;
-			if (CurrentLoadingIndex < Playlist.Num())
+			Actor.CurrentLoadingIndex++;
+			if (Actor.CurrentLoadingIndex < Actor.Playlist.Num())
 			{
-				LoadNiagaraSystemAsync();
+				Actor.LoadNiagaraSystemAsync();
 			}
 		}));
 }
@@ -137,19 +140,23 @@ void AEffectDisplayActor::Destroyed()
 
 bool AEffectDisplayActor::ShouldStartNextEffect() 
 {
+	//再生中のエフェクトがある
 	if (NiagaraComponent)
 		return false;
-
-	if (CurrentPlayIndex >= CurrentLoadingIndex)
+	//ロードが終わっていない
+	if (CurrentPlayIndex >= LoadedPlayList.Num())
 	{
-		if (CurrentPlayIndex  == Playlist.Num() - 1 && IsLoop)
-		{
-			CurrentPlayIndex = InvalidPlayIndex;
-			return true;
-		}
-		return false; 
+		return false;
 	}
-
+	//ループの最終判定
+	if (CurrentPlayIndex  == Playlist.Num() - 1 && !IsLoop)
+	{
+		return false;
+	}
+	if (CurrentPlayIndex  == Playlist.Num() - 1 && IsLoop)
+	{
+		CurrentPlayIndex = InvalidPlayIndex;
+	}
 	return true;
 }
 
@@ -157,7 +164,7 @@ void AEffectDisplayActor::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	if (NiagaraComponent)
+	if (IsValid(NiagaraComponent))
 	{
 		if (!NiagaraComponent->IsActive())
 		{
@@ -255,17 +262,6 @@ bool AEffectDisplayActor::PlayNext()
 	UE_LOG(LogTemp, Log,TEXT("AEffectDisplayActor Begin Play %s"),*PlaySystem->GetName());
 #endif
 	return true;
-}
-
-bool AEffectDisplayActor::IsPlaying() const
-{
-	if(!NiagaraComponent)
-	{
-		UE_LOG(LogTemp, Log,TEXT("AEffectDisplayActor::IsPlaying NiagaraComponent is nullptr"));
-		return false;
-	}
-		
-	return NiagaraComponent->IsActive() || CurrentPlayIndex != InvalidPlayIndex;
 }
 
 void AEffectDisplayActor::RotationNiagaraSystem(float DeltaTime)const
