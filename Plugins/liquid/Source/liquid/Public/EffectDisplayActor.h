@@ -28,7 +28,6 @@ public:
 	
 	virtual void BeginPlay() override;
 	virtual void Destroyed() override;
-	//void PlayEffect();
 protected:
 	virtual void Tick(float DeltaTime)override;
 	
@@ -39,7 +38,7 @@ private:
 	void RotationNiagaraSystem(float DeltaTime)const ;
 	void BeginLoadAsync();
 	void LoadNiagaraSystemAsync();
-	bool EvaluatePlayNext();
+	bool ShouldStartNextEffect();
 	
 #endif //UPROPERTYマクロ関連はビルドから除外できないかったのでここまで
 private:
@@ -55,8 +54,8 @@ private:
 	float RotateSpeed{.0f};
 	UPROPERTY(EditAnywhere, meta=(Tooltip = "1つあたりのエフェクトの再生時間"))
 	float PlayInterval{5.0f};
-	UPROPERTY(EditAnywhere, meta=(Tooltip = "ゲーム再生時に自動で登録したエフェクトを再生する"))
-	bool IsAutoPlay{true};
+	//UPROPERTY(EditAnywhere, meta=(Tooltip = "ゲーム再生時に自動で登録したエフェクトを再生する"))
+	//bool IsAutoPlay{true};
 	UPROPERTY(EditAnywhere, meta=(Tooltip = "ループ再生を行うかどうか"))
 	bool IsLoop{true};
 	

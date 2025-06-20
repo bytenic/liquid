@@ -34,37 +34,41 @@ AEffectDisplayActor::AEffectDisplayActor()
 
 void AEffectDisplayActor::BeginLoadAsync()
 {
-	if(AdditionalNiagaraFolderPath.IsEmpty())
+	if (!AdditionalNiagaraFolderPath.IsEmpty())
 	{
-		return;
-	}
-	const FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
-	const IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
+		const FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+		const IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
 
-	FARFilter Filter;
-	Filter.PackagePaths.Add(*AdditionalNiagaraFolderPath);
-	Filter.bRecursivePaths = true;
-	Filter.bIncludeOnlyOnDiskAssets = false;
+		FARFilter Filter;
+		Filter.PackagePaths.Add(*AdditionalNiagaraFolderPath);
+		Filter.bRecursivePaths = true;
+		Filter.bIncludeOnlyOnDiskAssets = false;
+		Filter.ClassPaths.Add(UNiagaraSystem::StaticClass()->GetClassPathName());
 
-	// アセットの検索
-	TArray<FAssetData> NiagaraAssetArray{};
-	NiagaraAssetArray.Reserve(PlaylistReserveCapacity);
-	AssetRegistry.GetAssets(Filter, NiagaraAssetArray);
+		// アセットの検索
+		TArray<FAssetData> NiagaraAssetArray{};
+		NiagaraAssetArray.Reserve(PlaylistReserveCapacity);
+		AssetRegistry.GetAssets(Filter, NiagaraAssetArray);
 
-	if(NiagaraAssetArray.IsEmpty())
-	{
-		UE_LOG(LogTemp, Log,TEXT("not found niagara system in %s "), *AdditionalNiagaraFolderPath);
-	}
-	for(const auto& Asset : NiagaraAssetArray)
-	{
-		TSoftObjectPtr<UNiagaraSystem> SoftPtr(Asset.ToSoftObjectPath());
-		Playlist.Add(SoftPtr);	
+		if(NiagaraAssetArray.IsEmpty())
+		{
+			UE_LOG(LogTemp, Log,TEXT("not found niagara system in %s "), *AdditionalNiagaraFolderPath);
+		}
+		for(const auto& Asset : NiagaraAssetArray)
+		{
+			TSoftObjectPtr<UNiagaraSystem> SoftPtr(Asset.ToSoftObjectPath());
+			Playlist.Add(SoftPtr);	
+		}
 	}
 	LoadNiagaraSystemAsync();
 }
 
 void AEffectDisplayActor::LoadNiagaraSystemAsync()
 {
+	if (!Playlist.IsValidIndex(CurrentLoadingIndex))
+	{
+		return;
+	}
 	FStreamableManager& Manager = UAssetManager::GetStreamableManager();
 	auto& SoftPtr = Playlist[CurrentLoadingIndex];
 	CurrentLoadingHandle = Manager.RequestAsyncLoad(
@@ -117,7 +121,7 @@ void AEffectDisplayActor::BeginPlay()
 	//初期値が無効になっているものがあれば取り除く
 	Playlist.RemoveAll([](const TSoftObjectPtr<UNiagaraSystem>& System)
 	{
-		return !System.IsNull();
+		return System.IsNull();
 	});
 	BeginLoadAsync();
 }
@@ -131,7 +135,7 @@ void AEffectDisplayActor::Destroyed()
 	}
 }
 
-bool AEffectDisplayActor::EvaluatePlayNext() 
+bool AEffectDisplayActor::ShouldStartNextEffect() 
 {
 	if (NiagaraComponent)
 		return false;
@@ -182,7 +186,7 @@ void AEffectDisplayActor::Tick(float DeltaTime)
 			StopCurrentPlayEffect();
 		}
 	}
-	if (EvaluatePlayNext())
+	if (ShouldStartNextEffect())
 	{
 		PlayNext();
 	}
