@@ -41,16 +41,19 @@ struct FTransientPostProcessConfig : public FTableRowBase
 
 	UPROPERTY(EditAnywhere,meta=(ToolTip="このポストプロセスのアルファ値の初期値(0で何もしない、1で完全適用)Weightをコントロールするカーブアセット"))
 	float InitialWeight = 1.0f;
-	
+	/**
+	 * Weight(0‑1) を時間で制御する FloatCurve。None の場合 InitialWeight を使用。
+	 * 0 で無効、1 でフル適用。
+	 */	
 	UPROPERTY(EditAnywhere,meta=(ToolTip="このポストプロセスのアルファ値(0で何もしない、1で完全適用)Weightをコントロールするカーブアセット。Noneの場合はInitialWeightを使用します"))
 	TObjectPtr<UCurveFloat> NormalizedWeightCurve{};
-	
+	/** カーブ制御により変更するスカラーパラメータリスト */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly,meta=(ToolTip="操作するマテリアルパラメータ"))
 	TArray<FPostProcessControlParams> ControlParameters;
 };
 
 /**
- * ポストプロセス実行タスクの進行状態
+ * @brief ポストプロセスタスクの Tick 戻り値。
  */
 enum class PostProcessTaskTickResult : uint8
 {
@@ -59,7 +62,9 @@ enum class PostProcessTaskTickResult : uint8
 };
 
 /**
- * 単一のポストプロセスエフェクトを実行・制御するタスク
+ * @brief 単一のポストプロセスエフェクトを実行・制御する GC 対応タスク。
+ *
+ * FGCObject を継承し、内部で生成した UMaterialInstanceDynamic を GC 参照で保護する。
  */
 class FTransientPostProcessTask : public FGCObject
 {
@@ -76,31 +81,52 @@ public:
 	virtual FString GetReferencerName() const override;
 	/** GC参照対象を追加 */
 	virtual void AddReferencedObjects(FReferenceCollector& Collector) override;
-	/** タスクを初期化・有効化 */
+	/**
+	 * @brief タスクを初期化して有効化。
+	 * @param OwnerMaterial 事前ロード済みのベースマテリアル
+	 * @return 成功した場合 true
+	 */
 	bool Activate(UMaterialInstance* OwnerMaterial);
+	/**
+	 * @brief 初期化用ラムダを受け取りつつタスクを有効化。
+	 * @param OwnerMaterial ベースマテリアル
+	 * @param InitFunction  M.I.D. に対し初期値を設定するユーザコールバック
+	 * @return 成功した場合 true
+	 */
 	bool Activate(UMaterialInstance* OwnerMaterial, const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction);
 	/**
-	 * タスクの更新処理
-	 * @param CameraManager カメラマネージャへの参照
-	 * @param DeltaTime 経過時間
-	 */	
+	 * @brief 1フレーム分更新し、ポストプロセスをカメラに反映する。
+	 * @param CameraManager 対象の APlayerCameraManager
+	 * @param DeltaTime     経過時間[秒]
+	 * @return 進行状態 (Progress / Finish)
+	 */
 	PostProcessTaskTickResult Tick(APlayerCameraManager* CameraManager, float DeltaTime);
-
+	/** @return データテーブル上の EffectID */
 	const FName& GetEffectID() const{return EffectID;}
+	/** @return タスクに紐付く構成情報 */
 	const FTransientPostProcessConfig* GetConfig() const{return PostProcessConfig;}
-
+	/**
+	 * @brief フレーム終了時にタスク削除予定かどうかを判定。
+	 * @param CurrentFrameDeltaTime 本フレームの DeltaTime
+	 */
 	bool IsScheduleDeleteTask(float CurrentFrameDeltaTime) const;
 
 private:
+	/** MID を生成 */
 	bool CreateMaterialInstanceDynamic(UMaterialInstance* OwnerMaterial);
+	/** 終了処理 (MID の GC など) */
 	void Cleanup();
+	/** WeightedBlendables を初期化 */
 	void InitializeOverrideSettings();
 private:
-	//memo: このふたつのポインタはUPostProcessCallSubsystemよりもこのクラスのライフサイクルが短いことと、DatatableをUPROPERTYで保持しているため生ポインタで保持している
+	// --------------------------------------------------------------------
+	//  外部所有参照 – ライフタイム保証は UPostProcessCallSubsystem が担う
+	// --------------------------------------------------------------------
+	//note: このふたつのポインタはUPostProcessCallSubsystemよりもこのクラスのライフサイクルが短いことと、DatatableをUPROPERTYで保持しているため生ポインタで保持している
 	const FTransientPostProcessConfig* PostProcessConfig{nullptr};
 	UPostProcessCallSubsystem* Owner{};
 
-	//memo: このオブジェクトをGCオブジェクトとして保護
+	//note: このオブジェクトをGCオブジェクトとして保護
 	TObjectPtr<UMaterialInstanceDynamic> MaterialInstanceDynamic{nullptr};
 	FPostProcessSettings OverrideSettings{};
 	FName EffectID{}; //DataTable上のID
@@ -120,13 +146,24 @@ public:
 	virtual void Deinitialize() override;
 
 	/**
-	 * データテーブル上のIDに基づいてポストエフェクトを実行
-	 * @param EffectID データテーブル内の行ID
-	 */	
+	 * @brief データテーブル ID を指定してエフェクトを再生。
+	 * @param EffectID 行ID
+	 * @return true: 再生開始, false: 失敗
+	 */
 	UFUNCTION(BlueprintCallable,Category="PostProcess", meta=(ToolTip="データテーブル上のIDに基づいてポストエフェクトを呼び出します"))
 	bool PlayTransientPostProcess(const FName& EffectID);
+	/**
+	 * @brief 再生時にラムダでマテリアル初期化を行うバージョン。
+	 * @param EffectID     行ID
+	 * @param InitFunction MID への初期設定コールバック
+	 */
 	bool PlayTransientPostProcess(const FName& EffectID, const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction);
-
+	/**
+	 * @brief 指定 ID のエフェクトが再生中かチェック。
+	 * @param EffectID 行ID
+	 * @param InWorld  DeltaSeconds 取得に用いる World (NULL 可)
+	 * @return 再生中なら true
+	 */
 	bool IsPlayingTransientPostProcess(const FName& EffectID, const UWorld* InWorld) const;
 	
 private:

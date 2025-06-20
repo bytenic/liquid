@@ -44,12 +44,11 @@ bool FTransientPostProcessTask::Activate(UMaterialInstance* OwnerMaterial, const
 }
 
 /**
- * カメラマネージャに対してポストプロセス設定を適用。
- * マテリアルパラメータをカーブに基づいて更新し、経過時間を考慮して進行状況を返す。
- *
- * @param CameraManager 対象のプレイヤーカメラマネージャ
- * @param DeltaTime 経過時間（秒）
- * @return タスクの進行状態
+ * @details
+ * - 経過時間を更新し、NormalizedElapsedTime(0‑1) を算出。
+ * - ControlParameters で指定された MID のスカラーをカーブで更新。
+ * - AddCachedPPBlend() で PostProcess をカメラへ適用。
+ * - 寿命(ElapsedTime >= Duration) を迎えたら Cleanup() し Finish を返す。
  */
 PostProcessTaskTickResult FTransientPostProcessTask::Tick(APlayerCameraManager* CameraManager, float DeltaTime)
 {
@@ -121,8 +120,10 @@ void FTransientPostProcessTask::InitializeOverrideSettings()
 }
 
 /**
- * サブシステムの初期化処理。
- * データテーブルを読み込み、更新処理をWorldPostActorTick に登録。
+ * @brief サブシステム初期化。
+ * - Datatable をロード
+ * - PostActorTick デリゲート登録
+ * - Datatable 行毎にマテリアルを非同期ロード開始
  */
 void UPostProcessCallSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -150,6 +151,10 @@ void UPostProcessCallSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	LoadPostProcessMaterialAsync(FirstLoadID);
 }
 
+/**
+ * @brief Datatable 行に紐付くマテリアルを非同期ロード。(逐次処理)
+ * @param EffectID 行ID
+ */
 void UPostProcessCallSubsystem::LoadPostProcessMaterialAsync(const FName& EffectID)
 {
 	const FTransientPostProcessConfig* Row = PostProcessTable->FindRow<FTransientPostProcessConfig>(EffectID, TEXT("UPostProcessCallSubsystem::Initialize"));
