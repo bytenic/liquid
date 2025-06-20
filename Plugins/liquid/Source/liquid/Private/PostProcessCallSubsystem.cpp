@@ -136,7 +136,6 @@ void UPostProcessCallSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		return;
 	}
 	
-	
 	PostActorTickHandle = FWorldDelegates::OnWorldPostActorTick.AddUObject(
 		this, &UPostProcessCallSubsystem::OnWorldPostActorTick);
 

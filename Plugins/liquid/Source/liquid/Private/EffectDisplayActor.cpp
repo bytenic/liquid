@@ -7,7 +7,13 @@
 #include "NiagaraSystemInstanceController.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
+#include "Engine/AssetManager.h"
+#include "Engine/StreamableManager.h"
+#include "Kismet/KismetSystemLibrary.h"
 
+#if WITH_EDITOR
+#include "Kismet/KismetArrayLibrary.h"
+#endif
 AEffectDisplayActor::AEffectDisplayActor()
 {
 	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
@@ -26,7 +32,7 @@ AEffectDisplayActor::AEffectDisplayActor()
 
 #if EFFECT_DISPLAY_ENABLED
 
-void AEffectDisplayActor::LoadAdditionalNiagaraSystems()
+void AEffectDisplayActor::BeginLoadAsync()
 {
 	if(AdditionalNiagaraFolderPath.IsEmpty())
 	{
@@ -51,12 +57,49 @@ void AEffectDisplayActor::LoadAdditionalNiagaraSystems()
 	}
 	for(const auto& Asset : NiagaraAssetArray)
 	{
-		UNiagaraSystem* System = Cast<UNiagaraSystem>(Asset.GetAsset());
-		if(System)
-		{
-			Playlist.Add(System);	
-		}
+		TSoftObjectPtr<UNiagaraSystem> SoftPtr(Asset.ToSoftObjectPath());
+		Playlist.Add(SoftPtr);	
 	}
+	LoadNiagaraSystemAsync();
+}
+
+void AEffectDisplayActor::LoadNiagaraSystemAsync()
+{
+	FStreamableManager& Manager = UAssetManager::GetStreamableManager();
+	auto& SoftPtr = Playlist[CurrentLoadingIndex];
+	CurrentLoadingHandle = Manager.RequestAsyncLoad(
+	SoftPtr.ToSoftObjectPath(),
+		FStreamableDelegate::CreateLambda([this]()
+		{
+			auto& SoftPtr = Playlist[CurrentLoadingIndex];
+			UNiagaraSystem* LoadedNiagara =  Playlist[CurrentLoadingIndex].Get();
+			const bool IsSuccess = Playlist[CurrentLoadingIndex].IsValid() && LoadedNiagara != nullptr;
+			if (!IsSuccess)
+			{
+				UE_LOG(LogTemp, Warning,
+				TEXT("[AEffectDisplayActor] Retry Load : %s"), *SoftPtr.ToSoftObjectPath().ToString());
+				LoadNiagaraSystemAsync();
+				return;
+			}
+			
+			if (LoadedNiagara)
+			{
+				LoadedPlayList.Add(LoadedNiagara);
+				UE_LOG(LogTemp, Log,
+				   TEXT("[AEffectDisplayActor::LoadNiagaraSystemAsync] Loaded Niagara %s"), *SoftPtr.ToSoftObjectPath().ToString());
+			}
+			else
+			{
+				UE_LOG(LogTemp, Error,
+				   TEXT("[AEffectDisplayActor::LoadNiagaraSystemAsync] Failed to load Niagara %s"),
+				   *SoftPtr.ToSoftObjectPath().ToString());
+			}
+			CurrentLoadingIndex++;
+			if (CurrentLoadingIndex < Playlist.Num())
+			{
+				LoadNiagaraSystemAsync();
+			}
+		}));
 }
 
 void AEffectDisplayActor::BeginPlay()
@@ -72,59 +115,75 @@ void AEffectDisplayActor::BeginPlay()
 	PlaceRoot->SetWorldLocation(RotateLocation + Radius);
 	
 	//初期値が無効になっているものがあれば取り除く
-	Playlist.RemoveAll([](const TObjectPtr<UNiagaraSystem>& System)
+	Playlist.RemoveAll([](const TSoftObjectPtr<UNiagaraSystem>& System)
 	{
-		return !IsValid(System);
+		return !System.IsNull();
 	});
-	LoadAdditionalNiagaraSystems();
-	if(IsAutoPlay && !Playlist.IsEmpty())
+	BeginLoadAsync();
+}
+
+void AEffectDisplayActor::Destroyed()
+{
+	Super::Destroyed();
+	if (CurrentLoadingHandle.IsValid())
 	{
-		PlayEffect();
+		CurrentLoadingHandle->CancelHandle();
 	}
 }
 
-void AEffectDisplayActor::PlayEffect()
+bool AEffectDisplayActor::EvaluatePlayNext() 
 {
-	if(IsPlaying())
+	if (NiagaraComponent)
+		return false;
+
+	if (CurrentPlayIndex >= CurrentLoadingIndex)
 	{
-		StopCurrentPlayEffect();
+		if (CurrentPlayIndex  == Playlist.Num() - 1 && IsLoop)
+		{
+			CurrentPlayIndex = InvalidPlayIndex;
+			return true;
+		}
+		return false; 
 	}
-	CurrentPlayIndex = InvalidPlayIndex;
-	PlayNext();
+
+	return true;
 }
 
 void AEffectDisplayActor::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
-	if (!NiagaraComponent)
-	{
-		return;
-	}
-	
-	if(!NiagaraComponent->IsActive())
-	{
-		StopCurrentPlayEffect();
-		PlayNext();
-		return;
-	}
-	RotationNiagaraSystem(DeltaTime);
 
-	const auto NiagaraSystem = NiagaraComponent->GetAsset();
-	if(!NiagaraSystem)
+	if (NiagaraComponent)
 	{
-		UE_LOG(LogTemp, VeryVerbose, TEXT("AEffectDisplayActor::Tick NiagaraSystem is nullptr"));
-		return;
+		if (!NiagaraComponent->IsActive())
+		{
+			//一旦次フレームで再生判定を行う
+			StopCurrentPlayEffect();
+			return;
+		}
+		
+		RotationNiagaraSystem(DeltaTime);
+		const auto NiagaraSystem = NiagaraComponent->GetAsset();
+		if(!NiagaraSystem)
+		{
+			UE_LOG(LogTemp, VeryVerbose, TEXT("AEffectDisplayActor::Tick NiagaraSystem is nullptr"));
+			return;
+		}
+		
+		const auto SystemInstanceController = NiagaraComponent->GetSystemInstanceController();
+		if(!SystemInstanceController.IsValid())
+		{
+			UE_LOG(LogTemp, Log,TEXT("AEffectDisplayActor::Tick SystemInstanceController Invalid"));
+			return;
+		}
+		const auto CurrentAge =SystemInstanceController->GetAge();
+		if(CurrentAge >= PlayInterval)
+		{
+			StopCurrentPlayEffect();
+		}
 	}
-	const auto SystemInstanceController = NiagaraComponent->GetSystemInstanceController();
-	if(!SystemInstanceController.IsValid())
+	if (EvaluatePlayNext())
 	{
-		UE_LOG(LogTemp, Log,TEXT("AEffectDisplayActor::Tick SystemInstanceController Invalid"));
-		return;
-	}
-	const auto CurrentAge =SystemInstanceController->GetAge();
-	if(CurrentAge >= PlayInterval)
-	{
-		StopCurrentPlayEffect();
 		PlayNext();
 	}
 }
@@ -144,12 +203,12 @@ void AEffectDisplayActor::StopCurrentPlayEffect()
 
 bool AEffectDisplayActor::PlayNext()
 {
-	if (Playlist.IsEmpty())
+	if (LoadedPlayList.IsEmpty())
 	{
 		return false;
 	}
 	CurrentPlayIndex++;
-	if(CurrentPlayIndex >= Playlist.Num())
+	if(CurrentPlayIndex >= LoadedPlayList.Num())
 	{
 		if(IsLoop)
 		{
@@ -162,7 +221,7 @@ bool AEffectDisplayActor::PlayNext()
 			return false;
 		}
 	}
-	UNiagaraSystem* PlaySystem = Playlist[CurrentPlayIndex];
+	UNiagaraSystem* PlaySystem = LoadedPlayList[CurrentPlayIndex];
 	NiagaraComponent = UNiagaraFunctionLibrary::SpawnSystemAttached(
 		PlaySystem,
 		PlaceRoot,
@@ -178,7 +237,19 @@ bool AEffectDisplayActor::PlayNext()
 		return false;
 	}
 	NiagaraComponent->SetAutoDestroy(true);
+
+#if WITH_EDITOR
+	UKismetSystemLibrary::PrintString(
+		this,
+		FString::Printf(TEXT("%s: %s"), *GetActorLabel(), *PlaySystem->GetName()),
+		true,
+		true,
+		FLinearColor::Yellow,
+		2.0f);
+	
+#else
 	UE_LOG(LogTemp, Log,TEXT("AEffectDisplayActor Begin Play %s"),*PlaySystem->GetName());
+#endif
 	return true;
 }
 

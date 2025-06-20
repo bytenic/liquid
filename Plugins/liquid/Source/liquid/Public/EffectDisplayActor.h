@@ -10,6 +10,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Engine/StreamableManager.h"
 #include "EffectDisplayActor.generated.h"
 
 class UNiagaraComponent;
@@ -26,7 +27,8 @@ public:
 #if	EFFECT_DISPLAY_ENABLED
 	
 	virtual void BeginPlay() override;
-	void PlayEffect();
+	virtual void Destroyed() override;
+	//void PlayEffect();
 protected:
 	virtual void Tick(float DeltaTime)override;
 	
@@ -35,11 +37,14 @@ private:
 	bool PlayNext();
 	bool IsPlaying() const;
 	void RotationNiagaraSystem(float DeltaTime)const ;
-	void LoadAdditionalNiagaraSystems();
+	void BeginLoadAsync();
+	void LoadNiagaraSystemAsync();
+	bool EvaluatePlayNext();
+	
 #endif //UPROPERTYマクロ関連はビルドから除外できないかったのでここまで
 private:
 	UPROPERTY(EditAnywhere, meta=(ToolTip="再生するエフェクトリスト"))
-	TArray<TObjectPtr<UNiagaraSystem>> Playlist{};
+	TArray<TSoftObjectPtr<UNiagaraSystem>> Playlist{};
 	UPROPERTY(EditAnywhere, meta=(Tooltip = "PlayListに追加するNiagaraフォルダのパス"))
 	FString AdditionalNiagaraFolderPath{};
 	UPROPERTY(EditAnywhere, meta=(Tooltip = "再生位置のオフセット"))
@@ -61,8 +66,13 @@ private:
 	TObjectPtr<USceneComponent> PlaceRoot{};	//実際のNiagaraComponent配置位置(RotationRadius)
 	UPROPERTY()
 	TObjectPtr<UNiagaraComponent> NiagaraComponent{}; //再生中のNiagara
-	int32 CurrentPlayIndex{-1}; //再生中のPlaylistArray Index
+	TSharedPtr<FStreamableHandle> CurrentLoadingHandle{};
+	UPROPERTY()
+	TArray<TObjectPtr<UNiagaraSystem>> LoadedPlayList{};
 
+	int32 CurrentPlayIndex{-1}; //再生中のPlaylistArray Index
+	int32 CurrentLoadingIndex{0}; //ロード中のIndex
+	
 	static constexpr int32 PlaylistReserveCapacity = 64;
 	static constexpr int32 InvalidPlayIndex = -1;
 };
