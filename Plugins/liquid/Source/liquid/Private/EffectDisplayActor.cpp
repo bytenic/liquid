@@ -9,10 +9,9 @@
 #include "AssetRegistry/IAssetRegistry.h"
 #include "Engine/AssetManager.h"
 #include "Engine/StreamableManager.h"
-#include "Kismet/KismetSystemLibrary.h"
 
 #if WITH_EDITOR
-#include "Kismet/KismetArrayLibrary.h"
+#include "Kismet/KismetSystemLibrary.h"
 #endif
 AEffectDisplayActor::AEffectDisplayActor()
 {
@@ -141,7 +140,7 @@ void AEffectDisplayActor::Destroyed()
 bool AEffectDisplayActor::ShouldStartNextEffect() 
 {
 	//再生中のエフェクトがある
-	if (NiagaraComponent)
+	if (IsValid(NiagaraComponent))
 		return false;
 	//ロードが終わっていない
 	if (CurrentPlayIndex >= LoadedPlayList.Num())
