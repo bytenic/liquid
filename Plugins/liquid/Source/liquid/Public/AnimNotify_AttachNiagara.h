@@ -71,14 +71,10 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Time Parameters", meta = (AllowPrivateAccess = "true"))
 	float DelayActivateTime{.0f};
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Time Parameters", meta = (AllowPrivateAccess = "true"))
-	float DeactiveTime{-1.0};
+	float DeactivateTime{.0f};
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Time Parameters", meta = (AllowPrivateAccess = "true"))
-	float DestroyTime{2.0f};
+	float DestroyAfterDeactivateTime {1.0f};
 
 	UPROPERTY()
 	TObjectPtr<UNiagaraComponent> NiagaraComponent{}; //note: 変数として保持しなくていいかもしれない
-
-	//FTimerHandle DelayActivateHandle;
-	//FTimerHandle DeactivateHandle;
-	//FTimerHandle DestroyHandle;
 };

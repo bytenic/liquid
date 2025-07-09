@@ -13,8 +13,6 @@ void UAnimNotify_AttachNiagara::Notify(USkeletalMeshComponent* MeshComp, UAnimSe
 {
 	Super::Notify(MeshComp, Animation, EventReference);
 	InitializeNiagara(MeshComp, Animation);
-	SetUpDeactivate(MeshComp, Animation);
-	SetUpDestroy(MeshComp, Animation);
 }
 
 void UAnimNotify_AttachNiagara::BeginDestroy()
@@ -30,29 +28,7 @@ void UAnimNotify_AttachNiagara::PostEditChangeProperty(struct FPropertyChangedEv
 
 void UAnimNotify_AttachNiagara::ValidateAssociatedAssets()
 {
-	//note: UAnimNotify_PlayNiagaraEffectから引用
-	static const FName NAME_AssetCheck("AssetCheck");
-
-	if ((NiagaraSystem != nullptr) && (NiagaraSystem->IsLooping()))
-	{
-		UObject* ContainingAsset = GetContainingAsset();
-
-		FMessageLog AssetCheckLog(NAME_AssetCheck);
-
-		const FText MessageLooping = FText::Format(
-			NSLOCTEXT("AnimNotify", "NiagaraSystem_ShouldNotLoop",
-			          "Niagara system {0} used in anim notify for asset {1} is set to looping, but the slot is a one-shot (it won't be played to avoid leaking a component per notify)."),
-			FText::AsCultureInvariant(NiagaraSystem->GetPathName()),
-			FText::AsCultureInvariant(ContainingAsset->GetPathName()));
-		AssetCheckLog.Error()
-		             ->AddToken(FUObjectToken::Create(ContainingAsset))
-		             ->AddToken(FTextToken::Create(MessageLooping));
-
-		if (GIsEditor)
-		{
-			AssetCheckLog.Notify(MessageLooping, EMessageSeverity::Warning, /*bForce=*/ true);
-		}
-	}
+	Super::ValidateAssociatedAssets();
 }
 #endif
 
@@ -80,7 +56,7 @@ UNiagaraComponent* UAnimNotify_AttachNiagara::SpawnNiagara(USkeletalMeshComponen
 
 	const FTransform MeshTransform = IsAttach
 		                                 ? MeshComp->GetSocketTransform(AttachSocketName, RTS_World)
-		                                 : MeshComp->GetRelativeTransform();
+		                                 : MeshComp->GetComponentTransform();
 	UNiagaraComponent* ReturnComp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
 		MeshComp->GetWorld(), NiagaraSystem, MeshTransform.TransformPosition(LocationOffset), FRotator::ZeroRotator,
 		FVector(1.0f), true);
@@ -158,6 +134,9 @@ void UAnimNotify_AttachNiagara::ActivateNiagara(USkeletalMeshComponent* MeshComp
 	NiagaraComponent = SpawnNiagara(MeshComp, Animation);
 	SetFloatParametersToNiagara(NiagaraComponent);
 	SetSocketLocationToNiagara(NiagaraComponent, MeshComp);
+
+	SetUpDeactivate(MeshComp, Animation);
+	SetUpDestroy(MeshComp, Animation);
 }
 
 void UAnimNotify_AttachNiagara::SetUpDeactivate(USkeletalMeshComponent* MeshComp, const UAnimSequenceBase* Animation)
@@ -167,7 +146,7 @@ void UAnimNotify_AttachNiagara::SetUpDeactivate(USkeletalMeshComponent* MeshComp
 		return;
 	}
 
-	if (DeactiveTime > .0f)
+	if (DeactivateTime > .0f)
 	{
 		TWeakObjectPtr<UNiagaraComponent> WeakNiagaraComponent = NiagaraComponent;
 		if (auto World = MeshComp->GetWorld())
@@ -179,7 +158,7 @@ void UAnimNotify_AttachNiagara::SetUpDeactivate(USkeletalMeshComponent* MeshComp
 				{
 					NiagaraComponentPtr->Deactivate();
 				}
-			}, DeactiveTime, false);
+			}, DeactivateTime, false);
 		}
 	}
 }
@@ -191,7 +170,7 @@ void UAnimNotify_AttachNiagara::SetUpDestroy(USkeletalMeshComponent* MeshComp, c
 		return;
 	}
 
-	if (DestroyTime > .0f)
+	if (DestroyAfterDeactivateTime > .0f)
 	{
 		TWeakObjectPtr<UNiagaraComponent> WeakNiagaraComponent = NiagaraComponent;
 		if (auto World = MeshComp->GetWorld())
@@ -204,7 +183,7 @@ void UAnimNotify_AttachNiagara::SetUpDestroy(USkeletalMeshComponent* MeshComp, c
 					NiagaraComponentPtr->Deactivate();
 					NiagaraComponentPtr->DestroyComponent();
 				}
-			}, DestroyTime, false);
+			}, DeactivateTime + DestroyAfterDeactivateTime, false);
 		}
 	}
 }
