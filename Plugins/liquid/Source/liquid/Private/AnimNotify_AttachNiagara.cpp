@@ -35,40 +35,41 @@ void UAnimNotify_AttachNiagara::ValidateAssociatedAssets()
 UNiagaraComponent* UAnimNotify_AttachNiagara::SpawnNiagara(USkeletalMeshComponent* MeshComp,
                                                            const UAnimSequenceBase* Animation) const
 {
-	if (!IsValid(MeshComp))
+	if (!IsValid(MeshComp) || !IsValid(NiagaraSystem) || !IsValid(MeshComp->GetWorld()))
 	{
 		return nullptr;
 	}
+	bool IsAutoDestroy = DestroyAfterDeactivateTime > 0.f;
 
-	if (!IsValid(Animation))
-	{
-		return nullptr;
-	}
-	if (!NiagaraSystem)
-	{
-		return nullptr;
-	}
-	if (NiagaraSystem->IsLooping())
-	{
-		if (IsValid(NiagaraComponent))
-			return NiagaraComponent.Get();
-	}
-
-	const FTransform MeshTransform = IsAttach
-		                                 ? MeshComp->GetSocketTransform(AttachSocketName, RTS_World)
-		                                 : MeshComp->GetComponentTransform();
-	UNiagaraComponent* ReturnComp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-		MeshComp->GetWorld(), NiagaraSystem, MeshTransform.TransformPosition(LocationOffset), FRotator::ZeroRotator,
-		FVector(1.0f), true);
-
+	UNiagaraComponent* Comp = nullptr;
 	if (IsAttach)
 	{
-		constexpr EAttachmentRule FixScalingRule = EAttachmentRule::KeepRelative;
-		FAttachmentTransformRules AttachRule{LocationRule, RotationRule, FixScalingRule, InWeldSimulatedBodies};
-		//ParentSocketNameがNoneまたは存在しないソケットの場合は親のTransformに直接アタッチされる
-		ReturnComp->AttachToComponent(MeshComp, AttachRule, AttachSocketName);
+		Comp = UNiagaraFunctionLibrary::SpawnSystemAttached(
+			NiagaraSystem, // System
+			MeshComp, // Parent
+			AttachSocketName, // Socket
+			LocationOffset, // 相対位置
+			RotationOffset, // 相対回転
+			EAttachLocation::KeepRelativeOffset, // 相対オフセットを保持
+			IsAutoDestroy
+		);
 	}
-	return ReturnComp;
+	else
+	{
+		const FTransform MeshTransform = MeshComp->DoesSocketExist(AttachSocketName)
+									 ? MeshComp->GetSocketTransform(AttachSocketName, RTS_World)
+									 : MeshComp->GetComponentTransform();
+		FRotator SpawnRot = MeshTransform.Rotator();
+		SpawnRot += RotationOffset;
+		Comp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+			MeshComp->GetWorld(),
+			NiagaraSystem,
+			MeshTransform.TransformPosition(LocationOffset),
+			SpawnRot,
+		FVector::One(),
+			IsAutoDestroy);
+	}
+	return Comp;
 }
 
 void UAnimNotify_AttachNiagara::SetFloatParametersToNiagara(UNiagaraComponent* InNiagaraComponent)
@@ -93,6 +94,18 @@ void UAnimNotify_AttachNiagara::SetSocketLocationToNiagara(UNiagaraComponent* In
 	}
 	for (const auto& Param : InitialSocketLocationParameters)
 	{
+		const FName& SocketName = Param.Key;
+		const FName& NiagaraVarName = Param.Value;
+		if (SocketName.IsNone() || !MeshComp->DoesSocketExist(SocketName))
+		{
+			UE_LOG(LogTemp, Warning,
+			       TEXT("[SetSocketLocationToNiagara] Socket '%s' was not found on mesh '%s' – "
+				       "Niagara parameter '%s' will be skipped."),
+			       *SocketName.ToString(),
+			       *GetNameSafe(MeshComp),
+			       *NiagaraVarName.ToString());
+			continue;
+		}
 		const FTransform SocketTransform = MeshComp->GetSocketTransform(Param.Key);
 		InNiagaraComponent->SetVariablePosition(Param.Value, SocketTransform.GetLocation());
 	}
@@ -102,8 +115,8 @@ void UAnimNotify_AttachNiagara::InitializeNiagara(USkeletalMeshComponent* MeshCo
 {
 	if (DelayActivateTime > .0f)
 	{
-		FWeakObjectPtr WeakMeshComp = MeshComp;
-		FWeakObjectPtr WeakAnimation = Animation;
+		TWeakObjectPtr<USkeletalMeshComponent>  WeakMeshComp = MeshComp;
+		TWeakObjectPtr<const UAnimSequenceBase> WeakAnimation = Animation;
 		TWeakObjectPtr<UAnimNotify_AttachNiagara> WeakThis = this;
 		if (auto World = MeshComp->GetWorld())
 		{
@@ -131,15 +144,20 @@ void UAnimNotify_AttachNiagara::InitializeNiagara(USkeletalMeshComponent* MeshCo
 
 void UAnimNotify_AttachNiagara::ActivateNiagara(USkeletalMeshComponent* MeshComp, const UAnimSequenceBase* Animation)
 {
-	NiagaraComponent = SpawnNiagara(MeshComp, Animation);
+	UNiagaraComponent* NiagaraComponent = SpawnNiagara(MeshComp, Animation);
+	if (!IsValid(NiagaraComponent))
+	{
+		return;
+	}
 	SetFloatParametersToNiagara(NiagaraComponent);
 	SetSocketLocationToNiagara(NiagaraComponent, MeshComp);
 
-	SetUpDeactivate(MeshComp, Animation);
-	SetUpDestroy(MeshComp, Animation);
+	ScheduleDeactivate(NiagaraComponent, MeshComp, Animation);
+	ScheduleDestroy(NiagaraComponent, MeshComp, Animation);
 }
 
-void UAnimNotify_AttachNiagara::SetUpDeactivate(USkeletalMeshComponent* MeshComp, const UAnimSequenceBase* Animation)
+void UAnimNotify_AttachNiagara::ScheduleDeactivate(UNiagaraComponent* NiagaraComponent,
+                                                   USkeletalMeshComponent* MeshComp, const UAnimSequenceBase* Animation)
 {
 	if (!IsValid(MeshComp) || !IsValid(NiagaraComponent))
 	{
@@ -163,7 +181,8 @@ void UAnimNotify_AttachNiagara::SetUpDeactivate(USkeletalMeshComponent* MeshComp
 	}
 }
 
-void UAnimNotify_AttachNiagara::SetUpDestroy(USkeletalMeshComponent* MeshComp, const UAnimSequenceBase* Animation)
+void UAnimNotify_AttachNiagara::ScheduleDestroy(UNiagaraComponent* NiagaraComponent, USkeletalMeshComponent* MeshComp,
+                                                const UAnimSequenceBase* Animation)
 {
 	if (!IsValid(MeshComp) || !IsValid(NiagaraComponent))
 	{
@@ -175,6 +194,7 @@ void UAnimNotify_AttachNiagara::SetUpDestroy(USkeletalMeshComponent* MeshComp, c
 		TWeakObjectPtr<UNiagaraComponent> WeakNiagaraComponent = NiagaraComponent;
 		if (auto World = MeshComp->GetWorld())
 		{
+			const float DestroyDelay = DeactivateTime + DestroyAfterDeactivateTime;
 			FTimerHandle DestroyHandle;
 			World->GetTimerManager().SetTimer(DestroyHandle, [WeakNiagaraComponent]()
 			{
@@ -183,7 +203,7 @@ void UAnimNotify_AttachNiagara::SetUpDestroy(USkeletalMeshComponent* MeshComp, c
 					NiagaraComponentPtr->Deactivate();
 					NiagaraComponentPtr->DestroyComponent();
 				}
-			}, DeactivateTime + DestroyAfterDeactivateTime, false);
+			}, DestroyDelay, false);
 		}
 	}
 }

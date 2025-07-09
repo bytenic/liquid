@@ -10,15 +10,6 @@
 class UNiagaraSystem;
 class UNiagaraComponent;
 
-/**
- * @brief Animation notify that spawns and attaches a Niagara particle system to a skeletal mesh during an animation sequence.
- *
- * This class facilitates the creation and management of a Niagara particle system during animation playback. It allows for
- * configuring attachment parameters such as location, rotation, and scale rules, and supports delay activation, destruction timing,
- * and initial particle system parameters.
- *
- * @note This class assumes the use of the Niagara particle system framework in Unreal Engine.
- */
 UCLASS()
 class LIQUID_API UAnimNotify_AttachNiagara : public UAnimNotify
 {
@@ -43,8 +34,8 @@ private:
 
 	void InitializeNiagara(USkeletalMeshComponent* MeshComp, const UAnimSequenceBase* Animation);
 	void ActivateNiagara(USkeletalMeshComponent* MeshComp, const UAnimSequenceBase* Animation);
-	void SetUpDeactivate(USkeletalMeshComponent* MeshComp, const UAnimSequenceBase* Animation);
-	void SetUpDestroy(USkeletalMeshComponent* MeshComp, const UAnimSequenceBase* Animation);
+	void ScheduleDeactivate(UNiagaraComponent* NiagaraComponent, USkeletalMeshComponent* MeshComp, const UAnimSequenceBase* Animation);
+	void ScheduleDestroy(UNiagaraComponent* NiagaraComponent, USkeletalMeshComponent* MeshComp, const UAnimSequenceBase* Animation);
 
 	
 private:
@@ -54,16 +45,16 @@ private:
 	bool IsAttach{false};
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Transforms", meta = (AllowPrivateAccess = "true"))
 	FName AttachSocketName{};
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Transforms", meta = (AllowPrivateAccess = "true"))
+	/*UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Transforms", meta = (AllowPrivateAccess = "true"))
 	EAttachmentRule LocationRule{EAttachmentRule::KeepRelative};
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Transforms", meta = (AllowPrivateAccess = "true"))
-	EAttachmentRule RotationRule{EAttachmentRule::KeepRelative};
-	//UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Transforms", meta = (AllowPrivateAccess = "true"))
-	//EAttachmentRule ScaleRule{EAttachmentRule::KeepRelative};
+	EAttachmentRule RotationRule{EAttachmentRule::KeepRelative};*/
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Transforms", meta = (AllowPrivateAccess = "true"))
 	bool InWeldSimulatedBodies{false};
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Transforms", meta = (AllowPrivateAccess = "true"))
 	FVector LocationOffset;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Transforms", meta = (AllowPrivateAccess = "true"))
+	FRotator RotationOffset;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "User Parameters", meta = (AllowPrivateAccess = "true"))
 	TMap<FName, float> InitialFloatParameters{};
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "User Parameters", meta = (AllowPrivateAccess = "true"))
@@ -72,9 +63,6 @@ private:
 	float DelayActivateTime{.0f};
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Time Parameters", meta = (AllowPrivateAccess = "true"))
 	float DeactivateTime{.0f};
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Time Parameters", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Time Parameters", meta = (AllowPrivateAccess = "true", ClampMin="0.0", UIMin="0.0"))
 	float DestroyAfterDeactivateTime {1.0f};
-
-	UPROPERTY()
-	TObjectPtr<UNiagaraComponent> NiagaraComponent{}; //note: 変数として保持しなくていいかもしれない
 };
