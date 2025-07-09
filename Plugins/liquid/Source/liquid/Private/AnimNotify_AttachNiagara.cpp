@@ -8,32 +8,54 @@
 #include "NiagaraSystem.h"
 #include "Misc/UObjectToken.h"
 
+/**
+* @brief アニメーション通知イベントが発生した時に呼び出される
+* @param MeshComp スケルタルメッシュコンポーネント
+* @param Animation アニメーションシーケンス
+* @param EventReference アニメーション通知イベントの参照
+*/
 void UAnimNotify_AttachNiagara::Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation,
-                                       const FAnimNotifyEventReference& EventReference)
+									   const FAnimNotifyEventReference& EventReference)
 {
 	Super::Notify(MeshComp, Animation, EventReference);
 	InitializeNiagara(MeshComp, Animation);
 }
 
+/**
+* @brief オブジェクトが破棄される時に呼び出される
+*/
 void UAnimNotify_AttachNiagara::BeginDestroy()
 {
 	Super::BeginDestroy();
 }
 
 #if WITH_EDITOR
+/**
+* @brief エディタでプロパティが変更された時に呼び出される
+* @param PropertyChangedEvent プロパティ変更イベント
+*/
 void UAnimNotify_AttachNiagara::PostEditChangeProperty(struct FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 }
 
+/**
+* @brief 関連アセットの検証を行う
+*/
 void UAnimNotify_AttachNiagara::ValidateAssociatedAssets()
 {
 	Super::ValidateAssociatedAssets();
 }
 #endif
 
+/**
+* @brief Niagaraエフェクトを生成する
+* @param MeshComp スケルタルメッシュコンポーネント
+* @param Animation アニメーションシーケンス
+* @return 生成されたNiagaraコンポーネント
+*/
 UNiagaraComponent* UAnimNotify_AttachNiagara::SpawnNiagara(USkeletalMeshComponent* MeshComp,
-                                                           const UAnimSequenceBase* Animation) const
+														   const UAnimSequenceBase* Animation) const
 {
 	if (!IsValid(MeshComp) || !IsValid(NiagaraSystem) || !IsValid(MeshComp->GetWorld()))
 	{
@@ -72,6 +94,10 @@ UNiagaraComponent* UAnimNotify_AttachNiagara::SpawnNiagara(USkeletalMeshComponen
 	return Comp;
 }
 
+/**
+* @brief Niagaraエフェクトにフロートパラメータを設定する
+* @param InNiagaraComponent 設定対象のNiagaraコンポーネント
+*/
 void UAnimNotify_AttachNiagara::SetFloatParametersToNiagara(UNiagaraComponent* InNiagaraComponent)
 {
 	if (!IsValid(InNiagaraComponent))
@@ -85,8 +111,13 @@ void UAnimNotify_AttachNiagara::SetFloatParametersToNiagara(UNiagaraComponent* I
 	}
 }
 
+/**
+* @brief Niagaraエフェクトにソケットの位置情報を設定する
+* @param InNiagaraComponent 設定対象のNiagaraコンポーネント
+* @param MeshComp スケルタルメッシュコンポーネント
+*/
 void UAnimNotify_AttachNiagara::SetSocketLocationToNiagara(UNiagaraComponent* InNiagaraComponent,
-                                                           USkeletalMeshComponent* MeshComp)
+														   USkeletalMeshComponent* MeshComp)
 {
 	if (!IsValid(InNiagaraComponent) || !IsValid(MeshComp))
 	{
@@ -99,11 +130,11 @@ void UAnimNotify_AttachNiagara::SetSocketLocationToNiagara(UNiagaraComponent* In
 		if (SocketName.IsNone() || !MeshComp->DoesSocketExist(SocketName))
 		{
 			UE_LOG(LogTemp, Warning,
-			       TEXT("[SetSocketLocationToNiagara] Socket '%s' was not found on mesh '%s' – "
-				       "Niagara parameter '%s' will be skipped."),
-			       *SocketName.ToString(),
-			       *GetNameSafe(MeshComp),
-			       *NiagaraVarName.ToString());
+				   TEXT("[SetSocketLocationToNiagara] Socket '%s' was not found on mesh '%s' – "
+					   "Niagara parameter '%s' will be skipped."),
+				   *SocketName.ToString(),
+				   *GetNameSafe(MeshComp),
+				   *NiagaraVarName.ToString());
 			continue;
 		}
 		const FTransform SocketTransform = MeshComp->GetSocketTransform(Param.Key);
@@ -111,6 +142,11 @@ void UAnimNotify_AttachNiagara::SetSocketLocationToNiagara(UNiagaraComponent* In
 	}
 }
 
+/**
+* @brief Niagaraエフェクトの初期化を行う
+* @param MeshComp スケルタルメッシュコンポーネント
+* @param Animation アニメーションシーケンス
+*/
 void UAnimNotify_AttachNiagara::InitializeNiagara(USkeletalMeshComponent* MeshComp, const UAnimSequenceBase* Animation)
 {
 	if (DelayActivateTime > .0f)
@@ -142,6 +178,11 @@ void UAnimNotify_AttachNiagara::InitializeNiagara(USkeletalMeshComponent* MeshCo
 	}
 }
 
+/**
+* @brief Niagaraエフェクトをアクティベートする
+* @param MeshComp スケルタルメッシュコンポーネント
+* @param Animation アニメーションシーケンス
+*/
 void UAnimNotify_AttachNiagara::ActivateNiagara(USkeletalMeshComponent* MeshComp, const UAnimSequenceBase* Animation)
 {
 	UNiagaraComponent* NiagaraComponent = SpawnNiagara(MeshComp, Animation);
@@ -156,8 +197,14 @@ void UAnimNotify_AttachNiagara::ActivateNiagara(USkeletalMeshComponent* MeshComp
 	ScheduleDestroy(NiagaraComponent, MeshComp, Animation);
 }
 
+/**
+* @brief Niagaraエフェクトの非アクティベートをスケジュールする
+* @param NiagaraComponent 対象のNiagaraコンポーネント
+* @param MeshComp スケルタルメッシュコンポーネント
+* @param Animation アニメーションシーケンス
+*/
 void UAnimNotify_AttachNiagara::ScheduleDeactivate(UNiagaraComponent* NiagaraComponent,
-                                                   USkeletalMeshComponent* MeshComp, const UAnimSequenceBase* Animation)
+												   USkeletalMeshComponent* MeshComp, const UAnimSequenceBase* Animation)
 {
 	if (!IsValid(MeshComp) || !IsValid(NiagaraComponent))
 	{
@@ -181,8 +228,14 @@ void UAnimNotify_AttachNiagara::ScheduleDeactivate(UNiagaraComponent* NiagaraCom
 	}
 }
 
+/**
+* @brief Niagaraエフェクトの破棄をスケジュールする
+* @param NiagaraComponent 対象のNiagaraコンポーネント
+* @param MeshComp スケルタルメッシュコンポーネント
+* @param Animation アニメーションシーケンス
+*/
 void UAnimNotify_AttachNiagara::ScheduleDestroy(UNiagaraComponent* NiagaraComponent, USkeletalMeshComponent* MeshComp,
-                                                const UAnimSequenceBase* Animation)
+												const UAnimSequenceBase* Animation)
 {
 	if (!IsValid(MeshComp) || !IsValid(NiagaraComponent))
 	{
