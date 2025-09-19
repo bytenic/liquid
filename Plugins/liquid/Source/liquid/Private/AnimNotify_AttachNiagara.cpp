@@ -173,8 +173,39 @@ void UAnimNotify_AttachNiagara::ActivateNiagara(USkeletalMeshComponent* MeshComp
 	{
 		ScheduleUpdateSocketLocation(NiagaraComponent, MeshComp, Animation);
 	}
+	ScheduleDetach(NiagaraComponent, MeshComp, Animation);
 	ScheduleDeactivate(NiagaraComponent, MeshComp, Animation);
 	ScheduleDestroy(NiagaraComponent, MeshComp, Animation);
+}
+
+void UAnimNotify_AttachNiagara::ScheduleDetach(UNiagaraComponent* NiagaraComponent, USkeletalMeshComponent* MeshComp,
+	const UAnimSequenceBase* Animation)
+{
+	if (!IsValid(MeshComp) || !IsValid(NiagaraComponent))
+	{
+		return;
+	}
+	if (DetachTime <= .0f)
+	{
+		return;
+	}
+	if (!bIsAttach)
+	{
+		return;
+	}
+	
+	TWeakObjectPtr<UNiagaraComponent> WeakNiagaraComponent = NiagaraComponent;
+	if (auto World = MeshComp->GetWorld())
+	{
+		FTimerHandle DetachHandle;
+		World->GetTimerManager().SetTimer(DetachHandle, [WeakNiagaraComponent]()
+		{
+			if (auto NiagaraComponentPtr = WeakNiagaraComponent.Get())
+			{
+				NiagaraComponentPtr->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+			}
+		}, DetachTime, false);
+	}
 }
 
 /**

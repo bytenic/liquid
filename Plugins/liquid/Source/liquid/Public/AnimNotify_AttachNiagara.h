@@ -71,6 +71,14 @@ private:
 	void ActivateNiagara(USkeletalMeshComponent* MeshComp, const UAnimSequenceBase* Animation);
 
 	/**
+	* @brief NiagaraのDetachをスケジュールする
+	* @param NiagaraComponent 対象のNiagaraコンポーネント
+	* @param MeshComp スケルタルメッシュコンポーネント
+	* @param Animation アニメーションシーケンス
+	*/
+	void ScheduleDetach(UNiagaraComponent* NiagaraComponent, USkeletalMeshComponent* MeshComp, const UAnimSequenceBase* Animation);
+
+	/**
 	* @brief Niagaraの非アクティブ化をスケジュールする
 	* @param NiagaraComponent 対象のNiagaraコンポーネント
 	* @param MeshComp スケルタルメッシュコンポーネント
@@ -116,6 +124,9 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "User Parameters", meta = (AllowPrivateAccess = "true", ToolTip="Niagaraに設定するソケット位置パラメータ"))
 	TMap<FName, FSocketAttachDesc> SocketLocationParameters{};
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Time Parameters", meta = (AllowPrivateAccess = "true", ToolTip="非アクティブ化するまでの時間"))
+	float DetachTime{.0f};
+	
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Time Parameters", meta = (AllowPrivateAccess = "true", ToolTip="非アクティブ化するまでの時間"))
 	float DeactivateTime{.0f};
 
