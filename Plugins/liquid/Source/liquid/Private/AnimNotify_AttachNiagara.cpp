@@ -18,7 +18,7 @@ void UAnimNotify_AttachNiagara::Notify(USkeletalMeshComponent* MeshComp, UAnimSe
 									   const FAnimNotifyEventReference& EventReference)
 {
 	Super::Notify(MeshComp, Animation, EventReference);
-	InitializeNiagara(MeshComp, Animation);
+	ActivateNiagara(MeshComp, Animation);
 }
 
 /**
@@ -27,6 +27,15 @@ void UAnimNotify_AttachNiagara::Notify(USkeletalMeshComponent* MeshComp, UAnimSe
 void UAnimNotify_AttachNiagara::BeginDestroy()
 {
 	Super::BeginDestroy();
+}
+
+FString UAnimNotify_AttachNiagara::GetNotifyName_Implementation() const
+{
+	if (NiagaraSystem)
+	{
+		return NiagaraSystem->GetName();
+	}
+	return Super::GetNotifyName_Implementation();
 }
 
 #if WITH_EDITOR
@@ -61,10 +70,9 @@ UNiagaraComponent* UAnimNotify_AttachNiagara::SpawnNiagara(USkeletalMeshComponen
 	{
 		return nullptr;
 	}
-	bool IsAutoDestroy = DestroyAfterDeactivateTime > 0.f;
-
+	
 	UNiagaraComponent* Comp = nullptr;
-	if (IsAttach)
+	if (bIsAttach)
 	{
 		Comp = UNiagaraFunctionLibrary::SpawnSystemAttached(
 			NiagaraSystem, // System
@@ -73,7 +81,7 @@ UNiagaraComponent* UAnimNotify_AttachNiagara::SpawnNiagara(USkeletalMeshComponen
 			LocationOffset, // 相対位置
 			RotationOffset, // 相対回転
 			EAttachLocation::KeepRelativeOffset, // 相対オフセットを保持
-			IsAutoDestroy
+			true
 		);
 	}
 	else
@@ -89,7 +97,7 @@ UNiagaraComponent* UAnimNotify_AttachNiagara::SpawnNiagara(USkeletalMeshComponen
 			MeshTransform.TransformPosition(LocationOffset),
 			SpawnRot,
 		FVector::One(),
-			IsAutoDestroy);
+			true);
 	}
 	return Comp;
 }
@@ -123,10 +131,10 @@ void UAnimNotify_AttachNiagara::SetSocketLocationToNiagara(UNiagaraComponent* In
 	{
 		return;
 	}
-	for (const auto& Param : InitialSocketLocationParameters)
+	for (const auto& Param : SocketLocationParameters)
 	{
 		const FName& SocketName = Param.Key;
-		const FName& NiagaraVarName = Param.Value;
+		const FName& NiagaraVarName = Param.Value.SocketName;
 		if (SocketName.IsNone() || !MeshComp->DoesSocketExist(SocketName))
 		{
 			UE_LOG(LogTemp, Warning,
@@ -137,44 +145,12 @@ void UAnimNotify_AttachNiagara::SetSocketLocationToNiagara(UNiagaraComponent* In
 				   *NiagaraVarName.ToString());
 			continue;
 		}
-		const FTransform SocketTransform = MeshComp->GetSocketTransform(Param.Key);
-		InNiagaraComponent->SetVariablePosition(Param.Value, SocketTransform.GetLocation());
-	}
-}
-
-/**
-* @brief Niagaraエフェクトの初期化を行う
-* @param MeshComp スケルタルメッシュコンポーネント
-* @param Animation アニメーションシーケンス
-*/
-void UAnimNotify_AttachNiagara::InitializeNiagara(USkeletalMeshComponent* MeshComp, const UAnimSequenceBase* Animation)
-{
-	if (DelayActivateTime > .0f)
-	{
-		TWeakObjectPtr<USkeletalMeshComponent>  WeakMeshComp = MeshComp;
-		TWeakObjectPtr<const UAnimSequenceBase> WeakAnimation = Animation;
-		TWeakObjectPtr<UAnimNotify_AttachNiagara> WeakThis = this;
-		if (auto World = MeshComp->GetWorld())
-		{
-			FTimerHandle DelayActivateHandle;
-			World->GetTimerManager().SetTimer(DelayActivateHandle, [WeakMeshComp, WeakAnimation, WeakThis]()
-			{
-				if (auto* ThisPtr = WeakThis.Get())
-				{
-					if (auto* MeshCompPtr = Cast<USkeletalMeshComponent>(WeakMeshComp.Get()))
-					{
-						if (auto* AnimationPtr = Cast<UAnimSequenceBase>(WeakAnimation.Get()))
-						{
-							ThisPtr->ActivateNiagara(MeshCompPtr, AnimationPtr);
-						}
-					}
-				}
-			}, DelayActivateTime, false);
-		}
-	}
-	else
-	{
-		ActivateNiagara(MeshComp, Animation);
+		const FTransform SocketTransform = (Param.Value.bIsLocalSpace) ?
+		SocketTransform.GetRelativeTransform(InNiagaraComponent->GetComponentTransform())
+		:
+		MeshComp->GetSocketTransform(Param.Key);
+		 
+		InNiagaraComponent->SetVariablePosition(NiagaraVarName, SocketTransform.GetLocation());
 	}
 }
 
@@ -193,6 +169,10 @@ void UAnimNotify_AttachNiagara::ActivateNiagara(USkeletalMeshComponent* MeshComp
 	SetFloatParametersToNiagara(NiagaraComponent);
 	SetSocketLocationToNiagara(NiagaraComponent, MeshComp);
 
+	if (IsNeedUpdateSocketLocation())
+	{
+		ScheduleUpdateSocketLocation(NiagaraComponent, MeshComp, Animation);
+	}
 	ScheduleDeactivate(NiagaraComponent, MeshComp, Animation);
 	ScheduleDestroy(NiagaraComponent, MeshComp, Animation);
 }
@@ -211,7 +191,7 @@ void UAnimNotify_AttachNiagara::ScheduleDeactivate(UNiagaraComponent* NiagaraCom
 		return;
 	}
 
-	if (DeactivateTime > .0f)
+	if (DeactivateTime > .0f && DeactivateTime < DestroyTime)
 	{
 		TWeakObjectPtr<UNiagaraComponent> WeakNiagaraComponent = NiagaraComponent;
 		if (auto World = MeshComp->GetWorld())
@@ -242,21 +222,86 @@ void UAnimNotify_AttachNiagara::ScheduleDestroy(UNiagaraComponent* NiagaraCompon
 		return;
 	}
 
-	if (DestroyAfterDeactivateTime > .0f)
+	if (DestroyTime > .0f)
 	{
 		TWeakObjectPtr<UNiagaraComponent> WeakNiagaraComponent = NiagaraComponent;
 		if (auto World = MeshComp->GetWorld())
 		{
-			const float DestroyDelay = DeactivateTime + DestroyAfterDeactivateTime;
 			FTimerHandle DestroyHandle;
 			World->GetTimerManager().SetTimer(DestroyHandle, [WeakNiagaraComponent]()
 			{
 				if (auto* NiagaraComponentPtr = WeakNiagaraComponent.Get())
 				{
-					NiagaraComponentPtr->Deactivate();
 					NiagaraComponentPtr->DestroyComponent();
 				}
-			}, DestroyDelay, false);
+			}, DestroyTime, false);
 		}
 	}
+}
+
+bool UAnimNotify_AttachNiagara::IsNeedUpdateSocketLocation() const
+{
+	for (const auto& Param : SocketLocationParameters)
+	{
+		if (Param.Value.bIsRequiareUpdate)
+		{
+			return true;
+		}
+	}
+	return false;
+	
+}
+
+void UAnimNotify_AttachNiagara::ScheduleUpdateSocketLocation(UNiagaraComponent* NiagaraComponent,
+	USkeletalMeshComponent* MeshComp, const UAnimSequenceBase* Animation)
+{
+	if (DestroyTime <= .0f)
+	{
+		return;
+	}
+	if (!IsValid(MeshComp) || !IsValid(NiagaraComponent))
+	{
+		return;
+	}
+	auto World = MeshComp->GetWorld();
+	if (!World)
+	{
+		return;
+	}
+	TWeakObjectPtr<UNiagaraComponent> WeakNiagaraComponent = NiagaraComponent;
+	TWeakObjectPtr<USkeletalMeshComponent> WeakMeshComp = MeshComp;
+	TWeakObjectPtr<UAnimNotify_AttachNiagara> WeakSelf = this;
+	TWeakObjectPtr<UWorld> WorldWeakPtr = World;
+
+	FTimerHandle TickTimerHandle;
+	FTimerDelegate TickDelegate = FTimerDelegate::CreateLambda([TickTimerHandle, WeakSelf, WeakMeshComp, WeakNiagaraComponent, WorldWeakPtr]() mutable
+	{
+		UAnimNotify_AttachNiagara* ThisPtr = WeakSelf.Get();
+		UNiagaraComponent* NiagaraComponent = WeakNiagaraComponent.Get();
+		USkeletalMeshComponent* MeshComp = WeakMeshComp.Get();
+		if (!ThisPtr || !NiagaraComponent || !MeshComp)
+		{
+			if (UWorld* CurrentWorld = WorldWeakPtr.Get())
+			{
+				CurrentWorld->GetTimerManager().ClearTimer(TickTimerHandle);
+			}
+			return;
+		}
+		if (IsValid(ThisPtr) && IsValid(NiagaraComponent) && IsValid(MeshComp))
+		{
+			ThisPtr->SetSocketLocationToNiagara(NiagaraComponent, MeshComp);
+		}
+	});
+
+	static constexpr float TickInterval = 1.0f /60.0f;
+	World->GetTimerManager().SetTimer(TickTimerHandle, TickDelegate, TickInterval, true);
+	FTimerHandle StopHandle;
+	FTimerDelegate StopDelegate = FTimerDelegate::CreateLambda([TickTimerHandle, WorldWeakPtr]() mutable
+	{
+		if (UWorld* CurrentWorld = WorldWeakPtr.Get())
+		{
+			CurrentWorld->GetTimerManager().ClearTimer(TickTimerHandle);
+		}
+	});
+	World->GetTimerManager().SetTimer(StopHandle, StopDelegate, DestroyTime, false);	
 }
