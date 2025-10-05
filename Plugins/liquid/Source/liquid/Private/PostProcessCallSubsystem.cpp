@@ -6,8 +6,8 @@
 #include "Engine/AssetManager.h"
 #include "Engine/StreamableManager.h"
 
-FTransientPostProcessTask::FTransientPostProcessTask(const FName& EffectID,const FTransientPostProcessConfig* ConfigPtr, UPostProcessCallSubsystem* Owner)
-	: PostProcessConfig(ConfigPtr), Owner(Owner), EffectID(EffectID)
+FTransientPostProcessTask::FTransientPostProcessTask(const FName& EffectID,const FTransientPostProcessConfig* ConfigPtr, UPostProcessCallSubsystem* Owner, float Duration)
+	: PostProcessConfig(ConfigPtr), Owner(Owner), EffectID(EffectID), Duration(Duration)
 {
 	check(Owner);
 }
@@ -53,7 +53,7 @@ bool FTransientPostProcessTask::Activate(UMaterialInstance* OwnerMaterial, const
 PostProcessTaskTickResult FTransientPostProcessTask::Tick(APlayerCameraManager* CameraManager, float DeltaTime)
 {
 	ElapsedTime += DeltaTime;
-	float NormalizedElapsedTime = ElapsedTime / PostProcessConfig->Duration;
+	float NormalizedElapsedTime = ElapsedTime / Duration;
 	NormalizedElapsedTime = FMath::Clamp(NormalizedElapsedTime, 0.0f, 1.0f);
 	for (const auto& Parameters : PostProcessConfig->ControlParameters)
 	{
@@ -75,7 +75,7 @@ PostProcessTaskTickResult FTransientPostProcessTask::Tick(APlayerCameraManager* 
 	CurrentWeight = FMath::Clamp(CurrentWeight, 0.0f, 1.0f);
 	CameraManager->AddCachedPPBlend(OverrideSettings, CurrentWeight, VTBlendOrder_Override);
 	
-	if ( ElapsedTime >= PostProcessConfig->Duration)
+	if ( ElapsedTime >= Duration)
 	{
 		Cleanup();
 		return PostProcessTaskTickResult::Finish;
@@ -86,7 +86,7 @@ PostProcessTaskTickResult FTransientPostProcessTask::Tick(APlayerCameraManager* 
 
 bool FTransientPostProcessTask::IsScheduleDeleteTask(float CurrentFrameDeltaTime) const
 {
-	return ElapsedTime + CurrentFrameDeltaTime >= PostProcessConfig->Duration;
+	return ElapsedTime + CurrentFrameDeltaTime >= Duration;
 }
 
 bool FTransientPostProcessTask::CreateMaterialInstanceDynamic(UMaterialInstance* OwnerMaterial)
@@ -242,7 +242,31 @@ bool UPostProcessCallSubsystem::PlayTransientPostProcess(const FName& EffectID)
 			UE_LOG(LogTemp, Error, TEXT("[UPostProcessCallSubsystem] Duration is 0 EffectID: %s "), *EffectID.ToString());
 			return false;
 		}
-		return BeginTransientPostProcess(EffectID, Row);
+		return BeginTransientPostProcess(EffectID, Row, Row->Duration);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("[UPostProcessCallSubsystem] Not Found ID: %s "), *EffectID.ToString());	
+	}
+	return false;
+}
+
+bool UPostProcessCallSubsystem::PlayTransientPostProcessWithDuration(const FName& EffectID, float Duration)
+{
+	if(!PostProcessTable)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[UPostProcessCallSubsystem] PostProcessTable is nullptr"));
+		return false;
+	}
+	if(const FTransientPostProcessConfig* Row = PostProcessTable->FindRow<FTransientPostProcessConfig>(EffectID, TEXT("PostProcessCallSubsystem")))
+	{
+	
+		if (Duration <= .0f)
+		{
+			UE_LOG(LogTemp, Error, TEXT("[UPostProcessCallSubsystem] Duration is 0 EffectID: %s "), *EffectID.ToString());
+			return false;
+		}
+		return BeginTransientPostProcess(EffectID, Row, Duration);
 	}
 	else
 	{
@@ -252,7 +276,7 @@ bool UPostProcessCallSubsystem::PlayTransientPostProcess(const FName& EffectID)
 }
 
 bool UPostProcessCallSubsystem::PlayTransientPostProcess(const FName& EffectID,
-	const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction)
+                                                         const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction)
 {
 	if(!PostProcessTable)
 	{
@@ -266,7 +290,7 @@ bool UPostProcessCallSubsystem::PlayTransientPostProcess(const FName& EffectID,
 			UE_LOG(LogTemp, Error, TEXT("[UPostProcessCallSubsystem] Duration is 0 EffectID: %s "), *EffectID.ToString());
 			return false;
 		}
-		return BeginTransientPostProcess(EffectID, Row, InitFunction);
+		return BeginTransientPostProcess(EffectID, Row, InitFunction, Row->Duration);
 	}
 	return false;
 }
@@ -296,7 +320,7 @@ bool UPostProcessCallSubsystem::IsPlayingTransientPostProcess(const FName& Effec
  * @param EffectID DataTable上のID
  * @param Config 実行するエフェクトの設定情報
  */
-bool UPostProcessCallSubsystem::BeginTransientPostProcess(const FName& EffectID, const FTransientPostProcessConfig* Config)
+bool UPostProcessCallSubsystem::BeginTransientPostProcess(const FName& EffectID, const FTransientPostProcessConfig* Config, float Duration)
 {
 	UMaterialInstance* LoadedMat = GetLoadedMaterial(EffectID);
 	if (!LoadedMat)
@@ -306,7 +330,7 @@ bool UPostProcessCallSubsystem::BeginTransientPostProcess(const FName& EffectID,
 			*EffectID.ToString());
 		return false;
 	}
-	auto InitTask =	MakeUnique<FTransientPostProcessTask>(EffectID, Config, this);
+	auto InitTask =	MakeUnique<FTransientPostProcessTask>(EffectID, Config, this, Duration);
 	if (InitTask->Activate(LoadedMat))
 	{
 		TransientTasks.Emplace(MoveTemp(InitTask));
@@ -321,7 +345,7 @@ bool UPostProcessCallSubsystem::BeginTransientPostProcess(const FName& EffectID,
 }
 
 bool UPostProcessCallSubsystem::BeginTransientPostProcess(const FName& EffectID, const FTransientPostProcessConfig* Config,
-	const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction)
+	const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction, float Duration)
 {
 	UMaterialInstance* LoadedMat = GetLoadedMaterial(EffectID);
 	if (!LoadedMat)
@@ -332,7 +356,7 @@ bool UPostProcessCallSubsystem::BeginTransientPostProcess(const FName& EffectID,
 		return false;
 	}
 	
-	auto InitTask =	MakeUnique<FTransientPostProcessTask>(EffectID, Config, this);
+	auto InitTask =	MakeUnique<FTransientPostProcessTask>(EffectID, Config, this, Duration);
 	if (InitTask->Activate(LoadedMat, InitFunction))
 	{
 		TransientTasks.Emplace(MoveTemp(InitTask));

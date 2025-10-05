@@ -71,11 +71,12 @@ public:
 
 	/**
 	 * コンストラクタ
-	 * * @param EffectID DataTable上のID
+	 * @param EffectID DataTable上のID
 	 * @param ConfigPtr 使用する構成情報
 	 * @param Owner 所有者（Subsystem）
+	 * @param Duration 実行時間
 	 */	
-	explicit FTransientPostProcessTask(const FName& EffectID, const FTransientPostProcessConfig* ConfigPtr, UPostProcessCallSubsystem* Owner);
+	explicit FTransientPostProcessTask(const FName& EffectID, const FTransientPostProcessConfig* ConfigPtr, UPostProcessCallSubsystem* Owner, float Duration);
 	/** GC参照の識別子名 */
 	virtual FString GetReferencerName() const override;
 	/** GC参照対象を追加 */
@@ -130,6 +131,7 @@ private:
 	FPostProcessSettings OverrideSettings{};
 	FName EffectID{}; //DataTable上のID
 	float ElapsedTime = .0f; //秒
+	float Duration = 1.0f; //実行時間。プログラム側から実行時間を設定できるように
 };
 
 /**
@@ -152,6 +154,14 @@ public:
 	UFUNCTION(BlueprintCallable,Category="PostProcess", meta=(ToolTip="データテーブル上のIDに基づいてポストエフェクトを呼び出します"))
 	bool PlayTransientPostProcess(const FName& EffectID);
 	/**
+	 * @brief データテーブル ID を指定してエフェクトを再生。
+	 * @param EffectID 行ID
+	 * @duration 再生時間
+	 * @return true: 再生開始, false: 失敗
+	 */
+	UFUNCTION(BlueprintCallable,Category="PostProcess", meta=(ToolTip="データテーブル上のIDとDurationに基づいてポストエフェクトを呼び出します"))
+	bool PlayTransientPostProcessWithDuration(const FName& EffectID, float Duration);
+	/**
 	 * @brief 再生時にラムダでマテリアル初期化を行うバージョン。
 	 * @param EffectID     行ID
 	 * @param InitFunction MID への初期設定コールバック
@@ -167,8 +177,8 @@ public:
 	
 private:
 	/** エフェクトの適用開始 */
-	bool BeginTransientPostProcess(const FName& EffectID, const FTransientPostProcessConfig* Config);
-	bool BeginTransientPostProcess(const FName& EffectID, const FTransientPostProcessConfig* Config, const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction);
+	bool BeginTransientPostProcess(const FName& EffectID, const FTransientPostProcessConfig* Config, float Duration);
+	bool BeginTransientPostProcess(const FName& EffectID, const FTransientPostProcessConfig* Config, const TFunctionRef<void(UMaterialInstanceDynamic*)>& InitFunction, float Duration);
 	
 	/** WorldのPostTick時に呼び出されるタスク更新関数 */
 	void OnWorldPostActorTick(UWorld* InWorld, ELevelTick InType,float DeltaTime);
