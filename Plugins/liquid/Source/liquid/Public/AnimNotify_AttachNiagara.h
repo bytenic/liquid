@@ -55,6 +55,12 @@ private:
 	* @param InNiagaraComponent 対象のNiagaraコンポーネント
 	*/
 	void SetFloatParametersToNiagara(UNiagaraComponent* InNiagaraComponent);
+	/**
+	* @brief NiagaraにVectorパラメータを設定する
+	* @param InNiagaraComponent 対象のNiagaraコンポーネント
+	*/
+	void SetVectorParametersToNiagara(UNiagaraComponent* InNiagaraComponent);
+	
 
 	/**
 	* @brief Niagaraにソケット位置を設定する
@@ -120,6 +126,9 @@ private:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "User Parameters", meta = (AllowPrivateAccess = "true", ToolTip="Niagaraに設定する初期float型パラメータ"))
 	TMap<FName, float> InitialFloatParameters{};
+	
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "User Parameters", meta = (AllowPrivateAccess = "true", ToolTip="Niagaraに設定する初期float型パラメータ"))
+    TMap<FName, FVector> InitialVectorParameters{};
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "User Parameters", meta = (AllowPrivateAccess = "true", ToolTip="Niagaraに設定するソケット位置パラメータ"))
 	TMap<FName, FSocketAttachDesc> SocketLocationParameters{};

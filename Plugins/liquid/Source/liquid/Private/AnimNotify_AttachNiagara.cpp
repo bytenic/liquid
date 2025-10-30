@@ -119,6 +119,19 @@ void UAnimNotify_AttachNiagara::SetFloatParametersToNiagara(UNiagaraComponent* I
 	}
 }
 
+void UAnimNotify_AttachNiagara::SetVectorParametersToNiagara(UNiagaraComponent* InNiagaraComponent)
+{
+	if (!IsValid(InNiagaraComponent))
+	{
+		return;
+	}
+
+	for (const auto& Param : InitialVectorParameters)
+	{
+		InNiagaraComponent->SetVariableVec3(Param.Key, Param.Value);
+	}
+}
+
 /**
 * @brief Niagaraエフェクトにソケットの位置情報を設定する
 * @param InNiagaraComponent 設定対象のNiagaraコンポーネント
@@ -167,6 +180,7 @@ void UAnimNotify_AttachNiagara::ActivateNiagara(USkeletalMeshComponent* MeshComp
 		return;
 	}
 	SetFloatParametersToNiagara(NiagaraComponent);
+	SetVectorParametersToNiagara(NiagaraComponent);
 	SetSocketLocationToNiagara(NiagaraComponent, MeshComp);
 
 	if (IsNeedUpdateSocketLocation())
