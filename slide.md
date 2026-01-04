@@ -46,7 +46,7 @@ style: |
 ---
 # テストレベル
 <div style="text-align:center;">
-  <video src="img/material_layer_doc.mp4" controls style="width:60%; height:auto;"></video>
+  <video src="img/sample_level.mp4" controls style="width:60%; height:auto;"></video>
 </div>
 
 ---
@@ -99,33 +99,28 @@ section.two-col ul { columns: 2; column-gap: 1; }
 ---
 # 制作背景
 ---
-# 元々はUber Materialで運用
+## 元々はUber Materialで運用
 - 機能別にStaticSwitchで分岐
-<image />
-
----
-# プロジェクトが進むにつれてマテリアルが巨大化
 - 前任者から引き継いだ時点でかなりの機能数があった
-- 表現を模索している段階もあり追加要望が大量にあった
 ---
-# 最初はそれなりに順調だったが...
-- 機能拡張が進むにつれ実装が大変になってきた
+## 最初はそれなりに順調だったけど...
+- 表現を模索している段階もあり追加要望が大量にあった
+  - 拡張が進むにつれ実装が大変になってきた
 - 単純な機能拡張は問題ないが全体の制御フローにかかわる拡張が大変
   - マスクテクスチャの値を複数の箇所で使いたい
   - LUTの適用箇所をマテリアルによって変えたい etc..
-
 ---
-# 機能はまだ追加する必要があるがどうにかシンプルにできないか
+## 機能はまだ追加する必要があるがどうにかシンプルにできないか
 - ノードグラフの整理やMaterialFunctionの切り分けは根本的な解決にならない
-  - StaticSwitchによる分岐制御構造自体に問題がある
+  - StaticSwitchによる分岐制御構造自体に限界が来ていた
   - Materialの切り分けも管理するマテリアルが増えるリスクがある
-## → MaterialLayerを使うのが良さそう
+### → MaterialLayerを使うのが良さそう
 ---
 # マテリアルの構造
 
 ---
 # ノード全体
-<image />
+![img](img/material_overview.png)
 
 ---
 # 処理は大きく3つのフェーズに分かれる
@@ -133,7 +128,7 @@ section.two-col ul { columns: 2; column-gap: 1; }
 2. レイヤースタック
 3. ポスト処理
 
-<image />
+![img](img/material_process_no.png)
 
 ---
 # Base Material共通処理
@@ -147,20 +142,17 @@ section.two-col ul { columns: 2; column-gap: 1; }
 # レイヤースタック評価
 - アーティスト側がMaterialInstance(MI)で設定する処理を実行する
 - マテリアルグラフ上ではこのノード一つで表現される
-<image グラフ/>
-<image MI/>
+![img](img/MIEditor1.png)
+
 
 ---
 # レイヤースタック処理構造
 - Base Materialの処理を入力として下から上へと処理される
-<image グラフ/>
----
-# レイヤースタックの処理
-<image レイヤースタックのハイライト/>
+![img](img/MIEditor2.png)
 
 ---
 # 各レイヤーの処理準は変更可能
-- Bottom Layerと呼ばれる特殊なレイヤーを除いて実行順は変更できる
+- Background Layerと呼ばれる特殊なレイヤーを除いて実行順は変更できる
 <image />
 <movie />
 
@@ -168,7 +160,8 @@ section.two-col ul { columns: 2; column-gap: 1; }
 # 各レイヤースタック間の値の受け渡し
 - MaterialAttributeノードを下位スタックの出力→上位スタックの入力として受け取る
   - Unlitの場合はEmissiveColor(float3)とOpacity(float)のみなので非常にシンプル
-<image />
+
+![img](img/MakeMaterialAttribute.png)
 
 ---
 # HLSLの疑似コード
@@ -216,20 +209,36 @@ MaterialAttribute EvaluateLayer(MaterialAttribute BottomLayer)
 }
 ```
 ---
-# 余計な処理が多そう...
+## 余計な処理が多そう...
 - 実際にはマテリアルグラフからHLSLへの変換時に不要な変数や処理は削除された状態で展開される
   - 上記の疑似コードのような構造体や関数は使用しない
 - レイヤースタックを使用することによる固有のオーバーヘッドは発生しない
 ```
-//ここに出力HLSLのコード
+    
+    MaterialFloat2 Local0 = Parameters.TexCoords[2].xy;
+    MaterialFloat2 Local1 = CustomExpression0(Parameters,DERIV_BASE_VALUE(Local0));
+    MaterialFloat2 Local2 = CustomExpression1(
+      Parameters,
+      GetDynamicParameter(Parameters.Particle,
+        MaterialFloat4(1.00000000,1.00000000,0.00000000,0.00000000), 1).rgba,
+        GetDynamicParameter(Parameters.Particle,
+        MaterialFloat4(0.00000000,0.00000000,1.00000000,0.00000000), 2).rgba,
+        Local1);
+    MaterialFloat2 Local3 = CustomExpression2(Parameters,MaterialFloat3(Local2,1.00000000),MaterialFloat3(0.00000000,0.00000000,0.00000000));
+    MaterialFloat Local4 = MaterialStoreTexCoordScale(Parameters, Local3, 1);
+    MaterialFloat4 Local5 = ProcessMaterialColorTextureLookup(Texture2DSampleBias(Material.Texture2D_0,Material.Texture2D_0Sampler,Local3,View.MaterialTextureMipBias));
+                                                      .
+                                                      .
+                                                      .
 
 ```
 ---
-# ただし例外があるかも
-- 使用するノードによっては処理負荷が上がりそうなものがあるかも(最近知った)
+## ただし例外はある(多分)
+- 使用するノードによっては処理負荷が上がりそうなものがある(最近知った)
   - BlendMaterialAttributesノードはかなり怪しい(このシステムでは未使用)
 - 運用していた実装範囲ではUberMaterialと比べて処理負荷が増加するようなものは見受けられなかった
-- あくまでEditorのStat上の命令数での観測なので正確な計測は各プラットフォームのプロファイラを使用したほうが良い
+- 2つの計算結果を受けとってLerpするようなノードをレイヤーの最終評価に挟むとはおそらくHLSL出力の最適化ができない
+- あくまでEditorのStat上の命令数での観測なので、正確な計測は各プラットフォームのプロファイラを使用したほうが良い
 
 ---
 # メリット、デメリット
