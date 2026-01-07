@@ -22,7 +22,6 @@ style: |
 ---
 # Material Layerを使ったVFX汎用マテリアル
 ---
-# アジェンダ
 - ## Material Layerとは
 - ## 作ったもの紹介
 - ## 制作背景
@@ -44,7 +43,6 @@ style: |
 ---
 # 作ったもの紹介
 ---
-# テストレベル
 <div style="text-align:center;">
   <video src="img/sample_level.mp4" controls style="width:60%; height:auto;"></video>
 </div>
@@ -101,13 +99,14 @@ section.two-col ul { columns: 2; column-gap: 1; }
 ---
 ## 元々はUber Materialで運用
 - 機能別にStaticSwitchで分岐
-- 前任者から引き継いだ時点でかなりの機能数があった
+- 前任者から引き継いだ時点でかなりの機能があった
 ---
 ## 最初はそれなりに順調だったけど...
 - 表現を模索している段階もあり追加要望が大量にあった
   - 拡張が進むにつれ実装が大変になってきた
 - 単純な機能拡張は問題ないが全体の制御フローにかかわる拡張が大変
   - マスクテクスチャの値を複数の箇所で使いたい
+    - Aの機能で使用した場合はBの機能ではOFFにするといった分岐
   - LUTの適用箇所をマテリアルによって変えたい etc..
 ---
 ## 機能はまだ追加する必要があるがどうにかシンプルにできないか
@@ -117,60 +116,72 @@ section.two-col ul { columns: 2; column-gap: 1; }
 ### → MaterialLayerを使うのが良さそう
 ---
 # マテリアルの構造
-
 ---
-# ノード全体
+## ノード全体
 ![img](img/material_overview.png)
 
 ---
-# 処理は大きく3つのフェーズに分かれる
+## 処理は大きく3つのフェーズに分かれる
 1. 共通処理
-2. レイヤースタック評価
+2. 各レイヤー評価
 3. ポスト処理
 
 ![img](img/material_process_no.png)
 
 ---
-# 1. Base Material共通処理
+## 1. Base Material共通処理
 - 全レイヤーが共通して使用できる値の計算を行う
   - 基本UV
   - Distortion(歪み)用UV
   - Dynamic Parameter(Niagaraから設定できる頂点Attribute)
+![img](img/before_process.png)
+---
+## 2. 各レイヤー評価
+- アーティスト側がMaterialInstance(MI)で設定する処理を実行する
+- Base Material上ではこのノード一つで表現される
+![img](img/material_layer_node.png)
 
 ---
+## レイヤースタック処理構造
+- レイヤーの設定はMaterialInstanceEditorで行う
 
-# 2. レイヤースタック評価
-- アーティスト側がMaterialInstance(MI)で設定する処理を実行する
-- マテリアルグラフ上ではこのノード一つで表現される
 ![img](img/MIEditor1.png)
 
-
 ---
-# レイヤースタック処理構造
-- Base Materialの処理を入力として下から上へと処理される
+## レイヤースタック処理構造
+- 設定したレイヤーは下から上の順に処理される
+
 ![img](img/MIEditor2.png)
 
 ---
-# 各レイヤーの処理準は変更可能
+## 各レイヤーの処理準は変更可能
 - Background Layerと呼ばれる特殊なレイヤーを除いて実行順は変更できる
 <image />
 <movie />
 
 ---
-# 各レイヤースタック間の値の受け渡し
+## 各レイヤースタック間の値の受け渡し
 - MaterialAttributeノードを下位スタックの出力→上位スタックの入力として受け取る
   - Unlitの場合はEmissiveColor(float3)とOpacity(float)のみなので非常にシンプル
 
 ![img](img/MakeMaterialAttribute.png)
 
 ---
-# HLSLの疑似コード
-##  MaterialAttribute定義
+## HLSLの疑似コード
+###  MaterialAttribute定義
 ```
 struct MaterialAttribute 
 {
   float3 BaseColor;
-  
+  float Metallic;
+  float Specular;
+  float Roughness;
+  float3 EmissiveColor;
+  float Opacity;
+    .
+    .
+    .
+
 }
 ```
 ---
@@ -190,13 +201,15 @@ MaterialAttribute EvaluateLayerStack(MaterialAttribute BaseMaterialResult)
 
 ```
 --- 
-# レイヤーの処理
-## Material Layer
+## レイヤーの処理
+
+### Material Layer
   - このレイヤーで使用したい値を用意する
     - 例:マスク処理→マスクテクスチャのサンプリングしてMaterialAttributeとして出力
-## Material Layer Blend
+### Material Layer Blend
 - 下レイヤーの結果のMaterialAttributeとMaterialLayerが出力したMaterialAttributeを入力として上位レイヤーへの出力となるMaterialAttributeを作成
   - 例:マスク処理→Material Layerのテクスチャサンプル結果をOpacityに乗算して出力
+#### →両方ともMaterialAttributeを入力→出力とするMaterialFunction
 ---
 ## レイヤー処理関数疑似コード
 ```
@@ -212,21 +225,22 @@ MaterialAttribute EvaluateLayer(MaterialAttribute BottomLayer)
 ## 余計な処理が多そう...
 - 実際にはマテリアルグラフからHLSLへの変換時に不要な変数や処理は削除された状態で展開される
   - 上記の疑似コードのような構造体や関数は使用しない
-- レイヤースタックを使用することによる固有のオーバーヘッドは発生しない
-```
-    
+- レイヤースタックを使用することによる固有のオーバーヘッドはこの段階で最適化される
+``` 
     MaterialFloat2 Local0 = Parameters.TexCoords[2].xy;
     MaterialFloat2 Local1 = CustomExpression0(Parameters,DERIV_BASE_VALUE(Local0));
-    MaterialFloat2 Local2 = CustomExpression1(
-      Parameters,
+    MaterialFloat2 Local2 = CustomExpression1(Parameters,
       GetDynamicParameter(Parameters.Particle,
         MaterialFloat4(1.00000000,1.00000000,0.00000000,0.00000000), 1).rgba,
         GetDynamicParameter(Parameters.Particle,
-        MaterialFloat4(0.00000000,0.00000000,1.00000000,0.00000000), 2).rgba,
-        Local1);
-    MaterialFloat2 Local3 = CustomExpression2(Parameters,MaterialFloat3(Local2,1.00000000),MaterialFloat3(0.00000000,0.00000000,0.00000000));
+        MaterialFloat4(0.00000000,0.00000000,1.00000000,0.00000000), 2).rgba,Local1);
+    MaterialFloat2 Local3 = CustomExpression2(
+      Parameters,
+      MaterialFloat3(Local2,1.00000000),
+      MaterialFloat3(0.00000000,0.00000000,0.00000000));
     MaterialFloat Local4 = MaterialStoreTexCoordScale(Parameters, Local3, 1);
-    MaterialFloat4 Local5 = ProcessMaterialColorTextureLookup(Texture2DSampleBias(Material.Texture2D_0,Material.Texture2D_0Sampler,Local3,View.MaterialTextureMipBias));
+    MaterialFloat4 Local5 = ProcessMaterialColorTextureLookup(
+      Texture2DSampleBias(Material.Texture2D_0,Material.Texture2D_0Sampler,Local3,View.MaterialTextureMipBias));
                                                       .
                                                       .
                                                       .
@@ -239,8 +253,13 @@ MaterialAttribute EvaluateLayer(MaterialAttribute BottomLayer)
 - 運用していた実装範囲ではUberMaterialと比べて処理負荷が増加するようなものは見受けられなかった
 - 2つの計算結果を受けとってLerpするようなノードをレイヤーの最終評価に挟むとはおそらくHLSL出力の最適化ができない
 - あくまでEditorのStat上の命令数での観測なので、正確な計測は各プラットフォームのプロファイラを使用したほうが良い
-
 ---
+## 3. ポスト処理
+- 最終出力前の調整処理
+  - 露出補正(Eye Adaptation)
+  - 単体レイヤー出力のデバッグ機能など
+![img](img/3_post_process.png)
+
 # メリット/デメリット, 注意しないといけないこと
 ---
 # メリット
