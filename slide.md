@@ -44,13 +44,12 @@ style: |
 # 作ったもの紹介
 ---
 <div style="text-align:center;">
-  <video src="img/sample_level.mp4" controls style="width:60%; height:auto;"></video>
+  <video src="img/sample_editor.mp4" controls style="width:60%; height:auto;"></video>
 </div>
 
 ---
-# エディタ動画
 <div style="text-align:center;">
-  <video src="img/material_layer_doc.mp4" controls style="width:60%; height:auto;"></video>
+  <video src="img/sample_level.mp4" controls style="width:60%; height:auto;"></video>
 </div>
 
 ---
@@ -156,8 +155,9 @@ section.two-col ul { columns: 2; column-gap: 1; }
 ---
 ## 各レイヤーの処理準は変更可能
 - Background Layerと呼ばれる特殊なレイヤーを除いて実行順は変更できる
-<image />
-<movie />
+<div style="text-align:center;">
+  <video src="img/process_change.mp4" controls style="width:60%; height:auto;"></video>
+</div>
 
 ---
 ## 各レイヤースタック間の値の受け渡し
@@ -167,7 +167,7 @@ section.two-col ul { columns: 2; column-gap: 1; }
 ![img](img/MakeMaterialAttribute.png)
 
 ---
-## HLSLの疑似コード
+## 疑似コード
 ###  MaterialAttribute定義
 ```
 struct MaterialAttribute 
