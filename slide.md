@@ -200,8 +200,15 @@ MaterialAttribute EvaluateLayerStack(MaterialAttribute BaseMaterialResult)
 }
 
 ```
+
 --- 
-## レイヤーの処理
+## レイヤー内部の処理
+![img](img/material_stack.png)
+
+
+
+--- 
+## レイヤー内部の処理
 
 ### Material Layer
   - このレイヤーで使用したい値を用意する
@@ -211,7 +218,7 @@ MaterialAttribute EvaluateLayerStack(MaterialAttribute BaseMaterialResult)
   - 例:マスク処理→Material Layerのテクスチャサンプル結果をOpacityに乗算して出力
 #### →両方ともMaterialAttributeを入力→出力とするMaterialFunction
 ---
-## レイヤー処理関数疑似コード
+## レイヤー内部処理関数疑似コード
 ```
 MaterialAttribute EvaluateLayer(MaterialAttribute BottomLayer)
 {
