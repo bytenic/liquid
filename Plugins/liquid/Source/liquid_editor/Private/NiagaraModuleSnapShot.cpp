@@ -131,6 +131,10 @@ namespace
 			[
 				SNew(SObjectPropertyEntryBox)
 				.AllowedClass(UNiagaraScript::StaticClass())
+				.ObjectPath_Lambda([State]()
+				{
+					return State->SelectedScript ? State->SelectedScript->GetPathName() : FString();
+				})
 				.OnObjectChanged_Lambda([State](const FAssetData& AssetData)
 				{
 					UNiagaraScript* LoadedScript = Cast<UNiagaraScript>(AssetData.GetAsset());
