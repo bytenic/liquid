@@ -1,7 +1,6 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "CoreMinimal.h"
-
 #define LOCTEXT_NAMESPACE "Fliquid_editorModule"
 
 
@@ -19,12 +18,10 @@ public:
 
 void Fliquid_editorModule::StartupModule()
 {
-
 }
 
 void Fliquid_editorModule::ShutdownModule()
 {
-
 }
 
 #undef LOCTEXT_NAMESPACE

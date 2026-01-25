@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 using UnrealBuildTool;
 
@@ -38,8 +38,15 @@ public class liquid_editor : ModuleRules
 				"Engine",
 				"Slate",
 				"SlateCore",
-				"RenderCore", 
-				"Niagara"
+				"RenderCore",
+				"AssetRegistry",
+				"PropertyEditor",
+				"UnrealEd",
+				"Blutility",
+				"Json",
+				"JsonUtilities",
+				"Niagara",
+				"NiagaraEditor"
 				// ... add private dependencies that you statically link with here ...	
 			}
 			);
