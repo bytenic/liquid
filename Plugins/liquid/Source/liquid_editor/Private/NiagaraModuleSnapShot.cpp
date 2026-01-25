@@ -327,9 +327,6 @@ void UNiagaraModuleSnapshotAction::CreateNiagaraModuleSnapshot()
 		const TArray<FNiagaraEmitterHandle>& Handles = System->GetEmitterHandles();
 		for (const FNiagaraEmitterHandle& Handle : Handles)
 		{
-			TSharedPtr<FJsonObject> EmitterObject = MakeShared<FJsonObject>();
-			EmitterObject->SetStringField(TEXT("Emitter"), Handle.GetName().ToString());
-
 			TArray<TSharedPtr<FJsonValue>> ModuleArray;
 			const FVersionedNiagaraEmitterData* EmitterData = Handle.GetEmitterData();
 			if (EmitterData)
@@ -353,12 +350,20 @@ void UNiagaraModuleSnapshotAction::CreateNiagaraModuleSnapshot()
 				}
 			}
 
-			EmitterObject->SetArrayField(TEXT("Modules"), ModuleArray);
-			EmitterArray.Add(MakeShared<FJsonValueObject>(EmitterObject));
+			if (ModuleArray.Num() > 0)
+			{
+				TSharedPtr<FJsonObject> EmitterObject = MakeShared<FJsonObject>();
+				EmitterObject->SetStringField(TEXT("Emitter"), Handle.GetName().ToString());
+				EmitterObject->SetArrayField(TEXT("Modules"), ModuleArray);
+				EmitterArray.Add(MakeShared<FJsonValueObject>(EmitterObject));
+			}
 		}
 
-		SystemObject->SetArrayField(TEXT("Emitters"), EmitterArray);
-		SystemArray.Add(MakeShared<FJsonValueObject>(SystemObject));
+		if (EmitterArray.Num() > 0)
+		{
+			SystemObject->SetArrayField(TEXT("Emitters"), EmitterArray);
+			SystemArray.Add(MakeShared<FJsonValueObject>(SystemObject));
+		}
 	}
 
 	TSharedPtr<FJsonObject> RootObject = MakeShared<FJsonObject>();
@@ -368,7 +373,10 @@ void UNiagaraModuleSnapshotAction::CreateNiagaraModuleSnapshot()
 	FString OutputString;
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutputString);
 	FJsonSerializer::Serialize(RootObject.ToSharedRef(), Writer);
+	OutputString.ReplaceInline(TEXT("\r\n"), TEXT("\n"));
+	OutputString.ReplaceInline(TEXT("\r"), TEXT("\n"));
 	OutputString.ReplaceInline(TEXT("\n"), TEXT("\r\n"));
+	OutputString.TrimEndInline();
 
 	const FString OutputPath = FPaths::Combine(FPaths::ProjectDir(), TEXT("Saved"), TEXT("NiagaraModuleSnapshotsResult.json"));
 	IFileManager::Get().MakeDirectory(*FPaths::GetPath(OutputPath), true);
