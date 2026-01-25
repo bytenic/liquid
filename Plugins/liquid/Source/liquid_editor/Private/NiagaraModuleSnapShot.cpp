@@ -30,6 +30,8 @@
 
 #define LOCTEXT_NAMESPACE "FNiagaraModuleSnapShot"
 
+#pragma optimize( "", off )
+
 namespace
 {
 	bool IsModuleScript(const UNiagaraScript* Script)
@@ -381,5 +383,7 @@ void UNiagaraModuleSnapshotAction::CreateNiagaraModuleSnapshot()
 		FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("SnapshotSaveSucceeded", "Niagara module snapshot saved to Saved/NiagaraModuleSnapshotsResult.json."));
 	}
 }
+
+#pragma optimize( "", on)
 
 #undef LOCTEXT_NAMESPACE
