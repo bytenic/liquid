@@ -2,6 +2,7 @@
 	"BuildId": "47537391",
 	"Modules": 
 	{
-		"liquid": "UnrealEditor-liquid.dll"
+		"liquid": "UnrealEditor-liquid.dll",
+		"liquid_editor": "UnrealEditor-liquid_editor.dll"
 	}
 }
