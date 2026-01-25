@@ -2,6 +2,7 @@
 	"BuildId": "47537391",
 	"Modules": 
 	{
-		"liquid": "UnrealEditor-liquid-Win64-DebugGame.dll"
+		"liquid": "UnrealEditor-liquid-Win64-DebugGame.dll",
+		"liquid_editor": "UnrealEditor-liquid_editor-Win64-DebugGame.dll"
 	}
 }
