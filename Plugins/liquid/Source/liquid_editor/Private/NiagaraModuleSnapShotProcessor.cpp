@@ -24,68 +24,8 @@
 
 #pragma optimize( "", off )
 
-
-
 namespace
 {
-	bool TrySetLiteralInputValue(const UEdGraphPin* Pin, const FString& FieldName, const TSharedPtr<FJsonObject>& InputsObject)
-	{
-		if (!Pin || !InputsObject.IsValid())
-		{
-			return false;
-		}
-
-		if (Pin->PinType.PinCategory == TEXT("ParameterMap"))
-		{
-			return false;
-		}
-
-		if (Pin->LinkedTo.Num() > 0)
-		{
-			return false;
-		}
-
-		FString ValueString;
-		if (Pin->DefaultObject)
-		{
-			ValueString = Pin->DefaultObject->GetPathName();
-		}
-		else if (!Pin->DefaultValue.IsEmpty())
-		{
-			ValueString = Pin->DefaultValue;
-		}
-		else if (!Pin->DefaultTextValue.IsEmpty())
-		{
-			ValueString = Pin->DefaultTextValue.ToString();
-		}
-
-		if (ValueString.IsEmpty())
-		{
-			return false;
-		}
-
-		if (ValueString.Equals(TEXT("true"), ESearchCase::IgnoreCase))
-		{
-			InputsObject->SetBoolField(FieldName, true);
-			return true;
-		}
-		if (ValueString.Equals(TEXT("false"), ESearchCase::IgnoreCase))
-		{
-			InputsObject->SetBoolField(FieldName, false);
-			return true;
-		}
-
-		double NumericValue = 0.0;
-		if (LexTryParseString(NumericValue, *ValueString))
-		{
-			InputsObject->SetNumberField(FieldName, NumericValue);
-			return true;
-		}
-
-		InputsObject->SetStringField(FieldName, ValueString);
-		return true;
-	}
-
 	void GatherModuleInputNames(UNiagaraScript* ModuleScript, TSet<FString>& OutInputNames)
 	{
 		if (!ModuleScript)
