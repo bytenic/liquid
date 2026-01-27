@@ -19,11 +19,12 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "ViewModels/Stack/NiagaraParameterHandle.h"
-#include "UObject/UnrealType.h"
 
 #define LOCTEXT_NAMESPACE "FNiagaraModuleSnapShotProcessor"
 
 #pragma optimize( "", off )
+
+
 
 namespace
 {
@@ -85,144 +86,6 @@ namespace
 		return true;
 	}
 
-	UEdGraphPin* FindParameterMapInputPin(const UNiagaraNodeFunctionCall& FunctionCallNode)
-	{
-		for (UEdGraphPin* Pin : FunctionCallNode.Pins)
-		{
-			if (!Pin || Pin->Direction != EGPD_Input)
-			{
-				continue;
-			}
-
-			if (Pin->PinType.PinSubCategoryObject == FNiagaraTypeDefinition::GetParameterMapStruct())
-			{
-				return Pin;
-			}
-		}
-
-		return nullptr;
-	}
-
-	bool IsOverridePinForFunction(UEdGraphPin& OverridePin, const UNiagaraNodeFunctionCall& FunctionCallNode)
-	{
-		if (OverridePin.PinType.PinSubCategoryObject == FNiagaraTypeDefinition::GetParameterMapStruct())
-		{
-			return false;
-		}
-
-		FNiagaraParameterHandle InputHandle(OverridePin.PinName);
-		return InputHandle.GetNamespace().ToString() == FunctionCallNode.GetFunctionName();
-	}
-
-	bool TryFindDefaultPinInModuleGraph(UNiagaraScript* ModuleScript, const FString& InputName, UEdGraphPin*& OutDefaultPin)
-	{
-		OutDefaultPin = nullptr;
-		if (!ModuleScript)
-		{
-			return false;
-		}
-
-		UNiagaraScriptSource* ModuleSource = Cast<UNiagaraScriptSource>(ModuleScript->GetLatestSource());
-		if (!ModuleSource || !ModuleSource->NodeGraph)
-		{
-			return false;
-		}
-
-		const auto ExtractInputName = [](const FString& FullName)
-		{
-			int32 DotIndex = INDEX_NONE;
-			if (FullName.FindLastChar(TEXT('.'), DotIndex))
-			{
-				return FullName.Mid(DotIndex + 1);
-			}
-			return FullName;
-		};
-
-		for (UEdGraphNode* Node : ModuleSource->NodeGraph->Nodes)
-		{
-			if (!Node)
-			{
-				continue;
-			}
-
-			if (Node->GetClass()->GetFName() != TEXT("NiagaraNodeParameterMapGet"))
-			{
-				continue;
-			}
-
-			FProperty* Property = Node->GetClass()->FindPropertyByName(TEXT("PinOutputToPinDefaultPersistentId"));
-			FMapProperty* MapProperty = CastField<FMapProperty>(Property);
-			if (!MapProperty)
-			{
-				continue;
-			}
-
-			void* MapPtr = MapProperty->ContainerPtrToValuePtr<void>(Node);
-			FScriptMapHelper MapHelper(MapProperty, MapPtr);
-
-			for (UEdGraphPin* OutputPin : Node->Pins)
-			{
-				if (!OutputPin || OutputPin->Direction != EGPD_Output || OutputPin->bOrphanedPin)
-				{
-					continue;
-				}
-
-				if (OutputPin->PinType.PinSubCategoryObject == FNiagaraTypeDefinition::GetParameterMapStruct())
-				{
-					continue;
-				}
-
-				const FString OutputName = OutputPin->PinName.ToString();
-				const FString OutputInputName = ExtractInputName(OutputName);
-				if (!OutputInputName.Equals(InputName))
-				{
-					continue;
-				}
-
-				const FGuid OutputGuid = OutputPin->PersistentGuid;
-				FGuid DefaultGuid;
-				bool bFoundDefaultGuid = false;
-				for (int32 Index = 0; Index < MapHelper.GetMaxIndex(); ++Index)
-				{
-					if (!MapHelper.IsValidIndex(Index))
-					{
-						continue;
-					}
-
-					const FGuid* KeyGuid = reinterpret_cast<FGuid*>(MapHelper.GetKeyPtr(Index));
-					const FGuid* ValueGuid = reinterpret_cast<FGuid*>(MapHelper.GetValuePtr(Index));
-					if (KeyGuid && ValueGuid && *KeyGuid == OutputGuid)
-					{
-						DefaultGuid = *ValueGuid;
-						bFoundDefaultGuid = true;
-						break;
-					}
-				}
-
-				if (!bFoundDefaultGuid)
-				{
-					continue;
-				}
-
-				for (UEdGraphPin* InputPin : Node->Pins)
-				{
-					if (!InputPin || InputPin->Direction != EGPD_Input)
-					{
-						continue;
-					}
-
-					if (InputPin->PersistentGuid == DefaultGuid)
-					{
-						OutDefaultPin = InputPin;
-						return true;
-					}
-				}
-			}
-		}
-
-		return false;
-	}
-
 	void GatherModuleInputNames(UNiagaraScript* ModuleScript, TSet<FString>& OutInputNames)
 	{
 		if (!ModuleScript)
@@ -271,6 +134,77 @@ namespace
 		}
 	}
 
+	bool TrySetRapidIterationValue(const UNiagaraScript* SourceScript, const FString& FunctionName, const FString& InputName,
+		const TArray<FNiagaraVariable>& RapidIterationVariables, const TSharedPtr<FJsonObject>& InputsObject)
+	{
+		if (!SourceScript || !InputsObject.IsValid())
+		{
+			return false;
+		}
+
+		const FString Suffix = TEXT(".") + InputName;
+		const FString FunctionToken = TEXT(".") + FunctionName + TEXT(".");
+		const FNiagaraVariable* MatchedVariable = nullptr;
+		int32 BestScore = -1;
+
+		for (const FNiagaraVariable& Variable : RapidIterationVariables)
+		{
+			const FString VariableName = Variable.GetName().ToString();
+			if (!VariableName.EndsWith(Suffix))
+			{
+				continue;
+			}
+
+			const int32 FunctionIndex = VariableName.Find(FunctionToken, ESearchCase::CaseSensitive, ESearchDir::FromStart);
+			if (FunctionIndex == INDEX_NONE)
+			{
+				continue;
+			}
+
+			const int32 Score = VariableName.Len();
+			if (Score > BestScore)
+			{
+				BestScore = Score;
+				MatchedVariable = &Variable;
+			}
+		}
+
+		if (!MatchedVariable)
+		{
+			return false;
+		}
+
+		const FNiagaraParameterStore& RapidIterationParameters = SourceScript->RapidIterationParameters;
+		if (RapidIterationParameters.IndexOf(*MatchedVariable) == INDEX_NONE)
+		{
+			return false;
+		}
+
+		const FNiagaraTypeDefinition& InputType = MatchedVariable->GetType();
+		if (InputType == FNiagaraTypeDefinition::GetFloatDef())
+		{
+			const float Value = RapidIterationParameters.GetParameterValue<float>(*MatchedVariable);
+			InputsObject->SetNumberField(InputName, Value);
+			return true;
+		}
+
+		if (InputType == FNiagaraTypeDefinition::GetIntDef())
+		{
+			const int32 Value = RapidIterationParameters.GetParameterValue<int32>(*MatchedVariable);
+			InputsObject->SetNumberField(InputName, Value);
+			return true;
+		}
+
+		if (InputType == FNiagaraTypeDefinition::GetBoolDef())
+		{
+			const FNiagaraBool Value = RapidIterationParameters.GetParameterValue<FNiagaraBool>(*MatchedVariable);
+			InputsObject->SetBoolField(InputName, Value.GetValue());
+			return true;
+		}
+
+		return false;
+	}
+
 	FString ScriptUsageToString(ENiagaraScriptUsage Usage)
 	{
 		const UEnum* Enum = StaticEnum<ENiagaraScriptUsage>();
@@ -312,68 +246,21 @@ namespace
 			ModuleObject->SetStringField(TEXT("ScriptUsage"), UsageLabel);
 
 			TSharedPtr<FJsonObject> InputsObject = MakeShared<FJsonObject>();
-			UEdGraphPin* ParameterMapInputPin = FindParameterMapInputPin(*FunctionNode);
-			UEdGraphNode* OverrideNode = nullptr;
-			if (ParameterMapInputPin && ParameterMapInputPin->LinkedTo.Num() == 1 && ParameterMapInputPin->LinkedTo[0])
-			{
-				OverrideNode = ParameterMapInputPin->LinkedTo[0]->GetOwningNode();
-			}
-			if (OverrideNode)
-			{
-				for (UEdGraphPin* OverridePin : OverrideNode->Pins)
-				{
-					if (!OverridePin || OverridePin->Direction != EGPD_Input)
-					{
-						continue;
-					}
-
-					if (!IsOverridePinForFunction(*OverridePin, *FunctionNode))
-					{
-						continue;
-					}
-
-					FNiagaraParameterHandle InputHandle(OverridePin->PinName);
-					const FString FieldName = InputHandle.GetName().ToString();
-					TrySetLiteralInputValue(OverridePin, FieldName, InputsObject);
-				}
-			}
-
 			TSet<FString> InputNames;
-			for (UEdGraphPin* Pin : FunctionNode->Pins)
-			{
-				if (!Pin || Pin->Direction != EGPD_Input)
-				{
-					continue;
-				}
-
-				if (Pin->PinType.PinSubCategoryObject == FNiagaraTypeDefinition::GetParameterMapStruct())
-				{
-					continue;
-				}
-
-				const FString PinName = Pin->PinName.ToString();
-				if (PinName.Equals(TEXT("InputMap")) || PinName.Equals(TEXT("OutputMap")))
-				{
-					continue;
-				}
-
-				InputNames.Add(PinName);
-			}
-
 			GatherModuleInputNames(TargetModule, InputNames);
 
+			TArray<FNiagaraVariable> RapidIterationVariables;
+			SourceScript->RapidIterationParameters.GetParameters(RapidIterationVariables);
+
+			const FString FunctionName = FunctionNode->GetFunctionName();
 			for (const FString& InputName : InputNames)
 			{
-				if (InputsObject->HasField(InputName))
-				{
-					continue;
-				}
+				TrySetRapidIterationValue(SourceScript, FunctionName, InputName, RapidIterationVariables, InputsObject);
+			}
 
-				UEdGraphPin* DefaultPin = nullptr;
-				if (TryFindDefaultPinInModuleGraph(TargetModule, InputName, DefaultPin))
-				{
-					TrySetLiteralInputValue(DefaultPin, InputName, InputsObject);
-				}
+			if (InputsObject->Values.Num() == 0)
+			{
+				continue;
 			}
 
 			ModuleObject->SetObjectField(TEXT("Inputs"), InputsObject);
