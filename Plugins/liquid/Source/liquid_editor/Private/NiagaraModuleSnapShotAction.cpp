@@ -22,7 +22,7 @@ namespace
 	{
 		UNiagaraScript* SelectedScript = nullptr;
 		bool bIsModuleScript = false;
-		FString SearchPath = TEXT("/Game");
+		FString SearchPath = TEXT("/Game/test_assetactions");
 		bool bAccepted = false;
 		TWeakPtr<SWindow> Window;
 
