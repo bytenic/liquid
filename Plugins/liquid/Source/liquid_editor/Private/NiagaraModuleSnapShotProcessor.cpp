@@ -12,6 +12,7 @@
 #include "NiagaraEmitter.h"
 #include "NiagaraGraph.h"
 #include "NiagaraNodeFunctionCall.h"
+#include "NiagaraNodeOutput.h"
 #include "NiagaraScript.h"
 #include "NiagaraScriptSource.h"
 #include "NiagaraSystem.h"
@@ -26,6 +27,24 @@
 
 namespace
 {
+	UEdGraphPin* FindParameterMapInputPin(const UEdGraphNode& Node)
+	{
+		for (UEdGraphPin* Pin : Node.Pins)
+		{
+			if (!Pin || Pin->Direction != EGPD_Input)
+			{
+				continue;
+			}
+
+			if (Pin->PinType.PinSubCategoryObject == FNiagaraTypeDefinition::GetParameterMapStruct())
+			{
+				return Pin;
+			}
+		}
+
+		return nullptr;
+	}
+
 	void GatherModuleInputNames(UNiagaraScript* ModuleScript, TSet<FString>& OutInputNames)
 	{
 		if (!ModuleScript)
@@ -71,6 +90,74 @@ namespace
 
 				OutInputNames.Add(InputName);
 			}
+		}
+	}
+
+	void TraverseParameterMapChain(UEdGraphPin* StartPin, UNiagaraScript* TargetModule, TSet<UEdGraphNode*>& VisitedNodes,
+		TArray<UNiagaraNodeFunctionCall*>& OutModuleNodes)
+	{
+		if (!StartPin)
+		{
+			return;
+		}
+
+		for (UEdGraphPin* LinkedPin : StartPin->LinkedTo)
+		{
+			if (!LinkedPin)
+			{
+				continue;
+			}
+
+			UEdGraphNode* Node = LinkedPin->GetOwningNode();
+			if (!Node || VisitedNodes.Contains(Node))
+			{
+				continue;
+			}
+
+			VisitedNodes.Add(Node);
+
+			if (UNiagaraNodeFunctionCall* FunctionNode = Cast<UNiagaraNodeFunctionCall>(Node))
+			{
+				if (FunctionNode->FunctionScript == TargetModule)
+				{
+					OutModuleNodes.Add(FunctionNode);
+				}
+			}
+
+			UEdGraphPin* InputPin = FindParameterMapInputPin(*Node);
+			if (InputPin && InputPin != StartPin)
+			{
+				TraverseParameterMapChain(InputPin, TargetModule, VisitedNodes, OutModuleNodes);
+			}
+		}
+	}
+
+	void GatherModuleNodesForUsage(UNiagaraGraph* Graph, UNiagaraScript* TargetModule, ENiagaraScriptUsage Usage,
+		TArray<UNiagaraNodeFunctionCall*>& OutModuleNodes)
+	{
+		if (!Graph || !TargetModule)
+		{
+			return;
+		}
+
+		TArray<UNiagaraNodeOutput*> OutputNodes;
+		Graph->GetNodesOfClass(OutputNodes);
+
+		for (UNiagaraNodeOutput* OutputNode : OutputNodes)
+		{
+			if (!OutputNode || OutputNode->GetUsage() != Usage)
+			{
+				continue;
+			}
+
+			UEdGraphPin* OutputInputPin = FindParameterMapInputPin(*OutputNode);
+			if (!OutputInputPin)
+			{
+				continue;
+			}
+
+			TSet<UEdGraphNode*> VisitedNodes;
+			TraverseParameterMapChain(OutputInputPin, TargetModule, VisitedNodes, OutModuleNodes);
 		}
 	}
 
@@ -166,7 +253,7 @@ namespace
 		}
 
 		TArray<UNiagaraNodeFunctionCall*> FunctionNodes;
-		ScriptSource->NodeGraph->GetNodesOfClass(FunctionNodes);
+		GatherModuleNodesForUsage(ScriptSource->NodeGraph, TargetModule, Usage, FunctionNodes);
 
 		for (UNiagaraNodeFunctionCall* FunctionNode : FunctionNodes)
 		{
