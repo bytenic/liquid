@@ -453,7 +453,7 @@ bool FNiagaraModuleSnapshotProcessor::CreateSnapshot(UNiagaraScript* ModuleScrip
 	OutputString.TrimEndInline();
 
 	OutOutputPath = FPaths::Combine(FPaths::ProjectDir(), TEXT("Saved"), TEXT("NiagaraModuleSnapshotsResult.json"));
-	IFileManager::Get().MakeDirectory(*FPaths::GetPath(OutOutputPath), true);
+	//IFileManager::Get().MakeDirecfatory(*FPaths::GetPath(OutOutputPath), true);
 
 	const bool bSaved = FFileHelper::SaveStringToFile(OutputString, *OutOutputPath, FFileHelper::EEncodingOptions::ForceUTF8);
 	if (!bSaved)
