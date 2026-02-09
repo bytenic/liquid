@@ -51,11 +51,15 @@ namespace
 	void CollectCurveDataInterfacesFromDynamicInputs(UNiagaraGraph* Graph, TArray<UNiagaraDataInterface*>& OutDataInterfaces);
 	void CollectDynamicInputNodeDebug(UNiagaraNodeFunctionCall* FunctionNode, TArray<FString>& OutEntries);
 	TSharedPtr<FJsonObject> BuildCurveObjectFromDataInterface(UNiagaraDataInterface* DataInterface);
-	bool TrySetCurvesFromFunctionCallNode(UNiagaraNodeFunctionCall* FunctionNode, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject);
+	bool TrySetCurvesFromFunctionCallNode(UNiagaraNodeFunctionCall* FunctionNode, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject,
+		const FString& FunctionName, const TArray<FNiagaraVariable>& RapidIterationVariables, const FNiagaraParameterStore& RapidIterationParameters);
 	void CollectFunctionCallPinDebug(UNiagaraNodeFunctionCall* FunctionNode, TArray<FString>& OutEntries);
 	void CollectDataInterfacesFromObjectDeep(const UObject* Owner, TArray<UNiagaraDataInterface*>& OutDataInterfaces);
 	void CollectCurveInterfacesFromOuter(const UObject* Outer, TArray<UNiagaraDataInterface*>& OutDataInterfaces);
 	UNiagaraDataInterface* SelectOuterCurveInterface(const TArray<UNiagaraDataInterface*>& Interfaces, const FString& ScriptPath, const FString& InputName);
+	bool TryOverrideCurveScale(const FString& FunctionName, const FString& InputName, const TArray<FNiagaraVariable>& RapidIterationVariables,
+		const FNiagaraParameterStore& RapidIterationParameters, const TSharedPtr<FJsonObject>& CurveObject);
+	bool IsCurveInputName(const FString& InputName);
 	UEdGraphPin* FindParameterMapSetInputPinInGraph(UNiagaraGraph* Graph, const FString& InputName, const FString& FunctionName);
 
 	UEdGraphPin* FindParameterMapInputPin(const UEdGraphNode& Node)
@@ -819,6 +823,7 @@ namespace
 			{
 				if (TSharedPtr<FJsonObject> CurveObject = BuildCurveObjectFromDataInterface(OuterCurve))
 				{
+					TryOverrideCurveScale(FunctionName, InputName, RapidIterationVariables, SourceScript->RapidIterationParameters, CurveObject);
 					InputsObject->SetObjectField(InputName, CurveObject);
 					return true;
 				}
@@ -935,6 +940,7 @@ namespace
 		{
 			if (TSharedPtr<FJsonObject> CurveObject = BuildCurveObjectFromDataInterface(OuterCurve))
 			{
+				TryOverrideCurveScale(FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, CurveObject);
 				InputsObject->SetObjectField(InputName, CurveObject);
 				return true;
 			}
@@ -1584,7 +1590,8 @@ namespace
 		return nullptr;
 	}
 
-	bool TrySetCurvesFromFunctionCallNode(UNiagaraNodeFunctionCall* FunctionNode, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject)
+	bool TrySetCurvesFromFunctionCallNode(UNiagaraNodeFunctionCall* FunctionNode, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject,
+		const FString& FunctionName, const TArray<FNiagaraVariable>& RapidIterationVariables, const FNiagaraParameterStore& RapidIterationParameters)
 	{
 		if (!FunctionNode || !InputsObject.IsValid())
 		{
@@ -1633,6 +1640,8 @@ namespace
 				continue;
 			}
 
+			TryOverrideCurveScale(FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, CurveObject);
+
 			const FString PinName = Pin->PinName.ToString();
 			int32 DotIndex = INDEX_NONE;
 			const FString SimplifiedName = PinName.FindLastChar(TEXT('.'), DotIndex)
@@ -1654,6 +1663,7 @@ namespace
 
 			if (TSharedPtr<FJsonObject> CurveObject = BuildCurveObjectFromDataInterface(Interface))
 			{
+				TryOverrideCurveScale(FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, CurveObject);
 				CurveMap.Add(Interface->GetName(), CurveObject);
 				DeepInterfaceNames.Add(FString::Printf(TEXT("%s : %s"), *Interface->GetName(), *Interface->GetClass()->GetName()));
 			}
@@ -1818,6 +1828,7 @@ namespace
 	{
 		UNiagaraDataInterface* BestInterface = nullptr;
 		int32 BestScore = -1;
+		const bool bHintedInput = IsCurveInputName(InputName);
 
 		for (UNiagaraDataInterface* Interface : Interfaces)
 		{
@@ -1844,6 +1855,11 @@ namespace
 				Score += 10;
 			}
 
+			if (!bHintedInput && !InputName.IsEmpty() && !Path.Contains(InputName))
+			{
+				continue;
+			}
+
 			if (Score > BestScore)
 			{
 				BestScore = Score;
@@ -1867,13 +1883,81 @@ namespace
 				}
 			}
 
-			if (CurveInterfaces.Num() == 1)
+			if (CurveInterfaces.Num() == 1 && bHintedInput)
 			{
 				return CurveInterfaces[0];
 			}
 		}
 
 		return BestInterface;
+	}
+
+	bool TryOverrideCurveScale(const FString& FunctionName, const FString& InputName, const TArray<FNiagaraVariable>& RapidIterationVariables,
+		const FNiagaraParameterStore& RapidIterationParameters, const TSharedPtr<FJsonObject>& CurveObject)
+	{
+		if (!CurveObject.IsValid())
+		{
+			return false;
+		}
+
+		const FString ScaleToken = TEXT("Scale Curve");
+		const FString CurveToken = TEXT("FloatFromCurve");
+		const FNiagaraVariable* BestVariable = nullptr;
+		int32 BestScore = -1;
+
+		for (const FNiagaraVariable& Variable : RapidIterationVariables)
+		{
+			if (Variable.GetType() != FNiagaraTypeDefinition::GetFloatDef())
+			{
+				continue;
+			}
+
+			const FString VarName = Variable.GetName().ToString();
+			if (!VarName.Contains(ScaleToken))
+			{
+				continue;
+			}
+
+			int32 Score = 0;
+			if (VarName.Contains(CurveToken))
+			{
+				Score += 10;
+			}
+			if (!FunctionName.IsEmpty() && VarName.Contains(FunctionName))
+			{
+				Score += 5;
+			}
+			if (!InputName.IsEmpty() && VarName.Contains(InputName))
+			{
+				Score += 3;
+			}
+
+			if (Score > BestScore)
+			{
+				BestScore = Score;
+				BestVariable = &Variable;
+			}
+		}
+
+		if (!BestVariable)
+		{
+			return false;
+		}
+
+		if (RapidIterationParameters.IndexOf(*BestVariable) == INDEX_NONE)
+		{
+			return false;
+		}
+
+		const float ScaleValue = RapidIterationParameters.GetParameterValue<float>(*BestVariable);
+		CurveObject->SetNumberField(TEXT("CurveScale"), ScaleValue);
+		return true;
+	}
+
+	bool IsCurveInputName(const FString& InputName)
+	{
+		return InputName.Contains(TEXT("Curve"), ESearchCase::IgnoreCase)
+			|| InputName.Contains(TEXT("Scale"), ESearchCase::IgnoreCase);
 	}
 
 	UEdGraphPin* FindParameterMapSetInputPinInGraph(UNiagaraGraph* Graph, const FString& InputName, const FString& FunctionName)
@@ -2141,7 +2225,8 @@ namespace
 		return nullptr;
 	}
 
-	bool TrySetDynamicInputCurveValue(UNiagaraNodeFunctionCall* FunctionNode, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject)
+	bool TrySetDynamicInputCurveValue(UNiagaraNodeFunctionCall* FunctionNode, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject,
+		const FString& FunctionName, const TArray<FNiagaraVariable>& RapidIterationVariables, const FNiagaraParameterStore& RapidIterationParameters)
 	{
 		if (!FunctionNode || !InputsObject.IsValid())
 		{
@@ -2161,7 +2246,7 @@ namespace
 
 				if (UNiagaraNodeFunctionCall* LinkedFunction = Cast<UNiagaraNodeFunctionCall>(LinkedPin->GetOwningNode()))
 				{
-					if (TrySetCurvesFromFunctionCallNode(LinkedFunction, InputName, InputsObject))
+					if (TrySetCurvesFromFunctionCallNode(LinkedFunction, InputName, InputsObject, FunctionName, RapidIterationVariables, RapidIterationParameters))
 					{
 						return true;
 					}
@@ -2173,8 +2258,14 @@ namespace
 					continue;
 				}
 
+				if (!IsCurveInputName(InputName))
+				{
+					continue;
+				}
+
 				if (TSharedPtr<FJsonObject> CurveObject = BuildCurveObjectFromDataInterface(DataInterface))
 				{
+					TryOverrideCurveScale(FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, CurveObject);
 					InputsObject->SetObjectField(InputName, CurveObject);
 					return true;
 				}
@@ -2219,7 +2310,6 @@ namespace
 			}
 		}
 
-		const FString FunctionName = FunctionNode->GetFunctionName();
 		UEdGraphPin* OutputMapPin = FindParameterMapOutputPin(FunctionNode);
 		if (!OutputMapPin)
 		{
@@ -2229,10 +2319,14 @@ namespace
 				{
 			if (UNiagaraDataInterface* DirectDataInterface = Cast<UNiagaraDataInterface>(GraphSetPin->DefaultObject))
 			{
-				if (TSharedPtr<FJsonObject> CurveObject = BuildCurveObjectFromDataInterface(DirectDataInterface))
+				if (IsCurveInputName(InputName))
 				{
-					InputsObject->SetObjectField(InputName, CurveObject);
-					return true;
+					if (TSharedPtr<FJsonObject> CurveObject = BuildCurveObjectFromDataInterface(DirectDataInterface))
+					{
+						TryOverrideCurveScale(FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, CurveObject);
+						InputsObject->SetObjectField(InputName, CurveObject);
+						return true;
+					}
 				}
 			}
 
@@ -2278,10 +2372,14 @@ namespace
 
 			if (UNiagaraDataInterface* DirectDataInterface = Cast<UNiagaraDataInterface>(SetInputPin->DefaultObject))
 			{
-				if (TSharedPtr<FJsonObject> CurveObject = BuildCurveObjectFromDataInterface(DirectDataInterface))
+				if (IsCurveInputName(InputName))
 				{
-					InputsObject->SetObjectField(InputName, CurveObject);
-					return true;
+					if (TSharedPtr<FJsonObject> CurveObject = BuildCurveObjectFromDataInterface(DirectDataInterface))
+					{
+						TryOverrideCurveScale(FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, CurveObject);
+						InputsObject->SetObjectField(InputName, CurveObject);
+						return true;
+					}
 				}
 			}
 
@@ -2297,29 +2395,14 @@ namespace
 			{
 				if (UNiagaraDataInterface* DirectDataInterface = Cast<UNiagaraDataInterface>(GraphSetPin->DefaultObject))
 				{
-					if (const UNiagaraDataInterfaceCurve* FloatCurve = Cast<UNiagaraDataInterfaceCurve>(DirectDataInterface))
+					if (IsCurveInputName(InputName))
 					{
-						TSharedPtr<FJsonObject> CurveObject = MakeShared<FJsonObject>();
-						CurveObject->SetNumberField(TEXT("CurveScale"), ExtractCurveScale(FloatCurve));
-						CurveObject->SetArrayField(TEXT("Keys"), BuildCurveKeysArray(FloatCurve->Curve));
-						InputsObject->SetObjectField(InputName, CurveObject);
-						return true;
-					}
-
-					if (const UNiagaraDataInterfaceColorCurve* ColorCurve = Cast<UNiagaraDataInterfaceColorCurve>(DirectDataInterface))
-					{
-						TSharedPtr<FJsonObject> CurveObject = MakeShared<FJsonObject>();
-						CurveObject->SetNumberField(TEXT("CurveScale"), ExtractCurveScale(ColorCurve));
-
-						TSharedPtr<FJsonObject> ChannelsObject = MakeShared<FJsonObject>();
-						ChannelsObject->SetArrayField(TEXT("R"), BuildCurveKeysArray(ColorCurve->RedCurve));
-						ChannelsObject->SetArrayField(TEXT("G"), BuildCurveKeysArray(ColorCurve->GreenCurve));
-						ChannelsObject->SetArrayField(TEXT("B"), BuildCurveKeysArray(ColorCurve->BlueCurve));
-						ChannelsObject->SetArrayField(TEXT("A"), BuildCurveKeysArray(ColorCurve->AlphaCurve));
-						CurveObject->SetObjectField(TEXT("Channels"), ChannelsObject);
-
-						InputsObject->SetObjectField(InputName, CurveObject);
-						return true;
+						if (TSharedPtr<FJsonObject> CurveObject = BuildCurveObjectFromDataInterface(DirectDataInterface))
+						{
+							TryOverrideCurveScale(FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, CurveObject);
+							InputsObject->SetObjectField(InputName, CurveObject);
+							return true;
+						}
 					}
 				}
 
@@ -2486,7 +2569,7 @@ bool AppendModuleSnapshots(UNiagaraScript* TargetModule, UNiagaraScript* SourceS
 					continue;
 				}
 
-				TrySetDynamicInputCurveValue(FunctionNode, InputName, InputsObject);
+				TrySetDynamicInputCurveValue(FunctionNode, InputName, InputsObject, FunctionName, RapidIterationVariables, SourceScript->RapidIterationParameters);
 			}
 
 			if (InputsObject->Values.Num() == 0)
