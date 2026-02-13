@@ -42,14 +42,10 @@ namespace
 	UNiagaraDataInterface* FindCurveDataInterfaceFromNode(const UEdGraphNode* Node);
 	UEdGraphPin* FindParameterMapSetInputPin(UEdGraphNode* SetNode, const FString& InputName, const FString& FunctionName);
 	void GatherDataInterfacesFromObject(const UObject* Owner, TArray<UNiagaraDataInterface*>& OutDataInterfaces);
-	void GatherStructDebug(const void* StructPtr, const UScriptStruct* StructType, TArray<FString>& OutProps, TArray<FString>& OutObjects, TArray<FString>& OutObjectArrays);
 	void GatherRapidIterationDataInterfacesFromParameters(const FNiagaraParameters& Parameters, TArray<UNiagaraDataInterface*>& OutDataInterfaces);
-	void FindDataInterfacesInStruct(const void* StructPtr, const UStruct* StructType, const FString& Path, TArray<FString>& OutEntries, int32 Depth);
 	void CollectDataInterfacesFromStruct(const void* StructPtr, const UStruct* StructType, TArray<UNiagaraDataInterface*>& OutDataInterfaces, int32 Depth);
-	void CollectCurveDataInterfacesFromGraph(UNiagaraGraph* Graph, TArray<UNiagaraDataInterface*>& OutDataInterfaces);
 	void CollectCurveDataInterfacesFromFunctionCall(UNiagaraNodeFunctionCall* FunctionNode, TArray<UNiagaraDataInterface*>& OutDataInterfaces);
 	void CollectCurveDataInterfacesFromDynamicInputs(UNiagaraGraph* Graph, TArray<UNiagaraDataInterface*>& OutDataInterfaces);
-	void CollectDynamicInputNodeDebug(UNiagaraNodeFunctionCall* FunctionNode, TArray<FString>& OutEntries);
 	void GatherInputNamesFromFunctionCallPins(UNiagaraNodeFunctionCall* FunctionNode, TSet<FString>& OutInputNames);
 	void GatherInputNamesFromRapidIteration(const FString& FunctionName, const TArray<FNiagaraVariable>& RapidIterationVariables, TSet<FString>& OutInputNames);
 	TSharedPtr<FJsonObject> BuildCurveObjectFromDataInterface(UNiagaraDataInterface* DataInterface);
@@ -64,7 +60,6 @@ namespace
 	bool TrySetCurvesFromFunctionCallNode(UNiagaraNodeFunctionCall* FunctionNode, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject,
 		const FString& FunctionName, const TArray<FNiagaraVariable>& RapidIterationVariables, const FNiagaraParameterStore& RapidIterationParameters,
 		const TArray<UNiagaraDataInterface*>& OuterCurveInterfaces, const FString& SourceScriptPath);
-	void CollectFunctionCallPinDebug(UNiagaraNodeFunctionCall* FunctionNode, TArray<FString>& OutEntries);
 	void CollectDataInterfacesFromObjectDeep(const UObject* Owner, TArray<UNiagaraDataInterface*>& OutDataInterfaces);
 	void CollectCurveInterfacesFromOuter(const UObject* Outer, TArray<UNiagaraDataInterface*>& OutDataInterfaces);
 	UNiagaraDataInterface* SelectOuterCurveInterface(const TArray<UNiagaraDataInterface*>& Interfaces, const FString& ScriptPath, const FString& InputName);
@@ -83,7 +78,6 @@ namespace
 	bool TrySetDefaultValueFromModuleRapidIteration(UNiagaraScript* ModuleScript, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject);
 	bool TrySetDefaultValueFromGraphMetadata(UNiagaraGraph* Graph, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject);
 	bool TrySetDefaultValueFromParameterMapGetNode(UEdGraphNode* GetNode, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject);
-	void AddDebugModuleGraphValuePins(UNiagaraGraph* Graph, const TSharedPtr<FJsonObject>& InputsObject);
 	UEdGraphPin* FindParameterMapGetValuePin(UEdGraphNode* GetNode, const FString& InputName);
 	FString GetPinDefaultString(UEdGraphPin* Pin);
 	bool TrySetDefaultValueFromCalledGraphInputs(UNiagaraNodeFunctionCall* FunctionNode, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject);
@@ -1045,36 +1039,12 @@ namespace
 
 	void AddDebugField(const TSharedPtr<FJsonObject>& InputsObject, const FString& Key, const FString& Value)
 	{
-		static const bool bEnableDebug = true;
-		if (!InputsObject.IsValid() || !bEnableDebug)
-		{
-			return;
-		}
-
-		InputsObject->SetStringField(Key, Value);
+		return;
 	}
 
 	void AddDebugArrayField(const TSharedPtr<FJsonObject>& InputsObject, const FString& Key, const TArray<FString>& Values)
 	{
-		static const bool bEnableDebug = true;
-		if (!InputsObject.IsValid() || Values.Num() == 0 || !bEnableDebug)
-		{
-			return;
-		}
-
-		TArray<TSharedPtr<FJsonValue>> JsonValues;
-		JsonValues.Reserve(Values.Num());
-		for (const FString& Value : Values)
-		{
-			JsonValues.Add(MakeShared<FJsonValueString>(Value));
-		}
-
-		if (InputsObject->HasField(Key))
-		{
-			return;
-		}
-
-		InputsObject->SetArrayField(Key, JsonValues);
+		return;
 	}
 
 	FString GetUniqueInputFieldName(const TSharedPtr<FJsonObject>& InputsObject, const FString& InputName, const FString& Suffix)
@@ -1589,7 +1559,6 @@ namespace
 			return false;
 		}
 		AddDebugField(InputsObject, TEXT("_DebugModuleDefaultStage"), TEXT("Begin"));
-		AddDebugModuleGraphValuePins(ModuleSource->NodeGraph, InputsObject);
 
 		for (UEdGraphNode* Node : ModuleSource->NodeGraph->Nodes)
 		{
@@ -2098,58 +2067,6 @@ namespace
 		}
 	}
 
-	void GatherStructDebug(const void* StructPtr, const UScriptStruct* StructType, TArray<FString>& OutProps, TArray<FString>& OutObjects, TArray<FString>& OutObjectArrays)
-	{
-		if (!StructPtr || !StructType)
-		{
-			return;
-		}
-
-		for (TFieldIterator<FProperty> It(StructType); It; ++It)
-		{
-			const FProperty* Property = *It;
-			if (!Property)
-			{
-				continue;
-			}
-
-			OutProps.Add(FString::Printf(TEXT("%s (%s)"), *Property->GetName(), *Property->GetClass()->GetName()));
-
-			if (const FObjectPropertyBase* ObjProp = CastField<FObjectPropertyBase>(Property))
-			{
-				UObject* Obj = ObjProp->GetObjectPropertyValue_InContainer(StructPtr);
-				const FString ObjName = Obj ? Obj->GetName() : TEXT("<null>");
-				const FString ObjClass = Obj ? Obj->GetClass()->GetName() : TEXT("<null>");
-				OutObjects.Add(FString::Printf(TEXT("%s : %s (%s)"), *Property->GetName(), *ObjName, *ObjClass));
-				continue;
-			}
-
-			if (const FArrayProperty* ArrayProp = CastField<FArrayProperty>(Property))
-			{
-				const FObjectPropertyBase* InnerObjProp = CastField<FObjectPropertyBase>(ArrayProp->Inner);
-				if (!InnerObjProp)
-				{
-					continue;
-				}
-
-				FScriptArrayHelper Helper(ArrayProp, ArrayProp->ContainerPtrToValuePtr<void>(StructPtr));
-				for (int32 Index = 0; Index < Helper.Num(); ++Index)
-				{
-					const void* ObjPtr = Helper.GetRawPtr(Index);
-					if (!ObjPtr)
-					{
-						continue;
-					}
-
-					UObject* Obj = InnerObjProp->GetObjectPropertyValue(ObjPtr);
-					const FString ObjName = Obj ? Obj->GetName() : TEXT("<null>");
-					const FString ObjClass = Obj ? Obj->GetClass()->GetName() : TEXT("<null>");
-					OutObjectArrays.Add(FString::Printf(TEXT("%s[%d] : %s (%s)"), *Property->GetName(), Index, *ObjName, *ObjClass));
-				}
-			}
-		}
-	}
-
 	void GatherRapidIterationDataInterfacesFromParameters(const FNiagaraParameters& Parameters, TArray<UNiagaraDataInterface*>& OutDataInterfaces)
 	{
 		const UScriptStruct* ParamsStruct = FNiagaraParameters::StaticStruct();
@@ -2177,155 +2094,6 @@ namespace
 		}
 
 		GatherRapidIterationDataInterfaces(*Store, OutDataInterfaces);
-	}
-
-	void FindDataInterfacesInStruct(const void* StructPtr, const UStruct* StructType, const FString& Path, TArray<FString>& OutEntries, int32 Depth)
-	{
-		if (!StructPtr || !StructType || Depth > 4 || OutEntries.Num() > 256)
-		{
-			return;
-		}
-
-		for (TFieldIterator<FProperty> It(StructType); It; ++It)
-		{
-			const FProperty* Property = *It;
-			if (!Property)
-			{
-				continue;
-			}
-
-			const FString PropPath = Path.IsEmpty()
-				? Property->GetName()
-				: FString::Printf(TEXT("%s.%s"), *Path, *Property->GetName());
-
-			if (const FObjectPropertyBase* ObjProp = CastField<FObjectPropertyBase>(Property))
-			{
-				if (!ObjProp->PropertyClass || !ObjProp->PropertyClass->IsChildOf(UNiagaraDataInterface::StaticClass()))
-				{
-					continue;
-				}
-
-				UObject* Obj = ObjProp->GetObjectPropertyValue_InContainer(StructPtr);
-				if (UNiagaraDataInterface* DataInterface = Cast<UNiagaraDataInterface>(Obj))
-				{
-					OutEntries.Add(FString::Printf(TEXT("%s : %s (%s)"), *PropPath, *DataInterface->GetName(), *DataInterface->GetClass()->GetName()));
-				}
-				continue;
-			}
-
-			if (const FStructProperty* StructProp = CastField<FStructProperty>(Property))
-			{
-				const void* InnerPtr = StructProp->ContainerPtrToValuePtr<void>(StructPtr);
-				FindDataInterfacesInStruct(InnerPtr, StructProp->Struct, PropPath, OutEntries, Depth + 1);
-				continue;
-			}
-
-			if (const FArrayProperty* ArrayProp = CastField<FArrayProperty>(Property))
-			{
-				const void* ArrayPtr = ArrayProp->ContainerPtrToValuePtr<void>(StructPtr);
-				FScriptArrayHelper Helper(ArrayProp, ArrayPtr);
-
-				if (const FObjectPropertyBase* InnerObjProp = CastField<FObjectPropertyBase>(ArrayProp->Inner))
-				{
-					if (!InnerObjProp->PropertyClass || !InnerObjProp->PropertyClass->IsChildOf(UNiagaraDataInterface::StaticClass()))
-					{
-						continue;
-					}
-
-					for (int32 Index = 0; Index < Helper.Num(); ++Index)
-					{
-						const void* ObjPtr = Helper.GetRawPtr(Index);
-						if (!ObjPtr)
-						{
-							continue;
-						}
-
-						UObject* Obj = InnerObjProp->GetObjectPropertyValue(ObjPtr);
-						if (UNiagaraDataInterface* DataInterface = Cast<UNiagaraDataInterface>(Obj))
-						{
-							OutEntries.Add(FString::Printf(TEXT("%s[%d] : %s (%s)"), *PropPath, Index, *DataInterface->GetName(), *DataInterface->GetClass()->GetName()));
-						}
-					}
-
-					continue;
-				}
-
-				if (const FStructProperty* InnerStructProp = CastField<FStructProperty>(ArrayProp->Inner))
-				{
-					for (int32 Index = 0; Index < Helper.Num(); ++Index)
-					{
-						const void* InnerPtr = Helper.GetRawPtr(Index);
-						if (!InnerPtr)
-						{
-							continue;
-						}
-
-						const FString ElemPath = FString::Printf(TEXT("%s[%d]"), *PropPath, Index);
-						FindDataInterfacesInStruct(InnerPtr, InnerStructProp->Struct, ElemPath, OutEntries, Depth + 1);
-					}
-				}
-
-				continue;
-			}
-
-			if (const FMapProperty* MapProp = CastField<FMapProperty>(Property))
-			{
-				const void* MapPtr = MapProp->ContainerPtrToValuePtr<void>(StructPtr);
-				FScriptMapHelper MapHelper(MapProp, MapPtr);
-
-				if (const FObjectPropertyBase* ValueObjProp = CastField<FObjectPropertyBase>(MapProp->ValueProp))
-				{
-					if (!ValueObjProp->PropertyClass || !ValueObjProp->PropertyClass->IsChildOf(UNiagaraDataInterface::StaticClass()))
-					{
-						continue;
-					}
-
-					for (int32 Index = 0; Index < MapHelper.Num(); ++Index)
-					{
-						if (!MapHelper.IsValidIndex(Index))
-						{
-							continue;
-						}
-
-						const uint8* PairPtr = MapHelper.GetPairPtr(Index);
-						const void* ValuePtr = MapProp->ValueProp->ContainerPtrToValuePtr<void>(PairPtr);
-						if (!ValuePtr)
-						{
-							continue;
-						}
-
-						UObject* Obj = ValueObjProp->GetObjectPropertyValue(ValuePtr);
-						if (UNiagaraDataInterface* DataInterface = Cast<UNiagaraDataInterface>(Obj))
-						{
-							OutEntries.Add(FString::Printf(TEXT("%s[%d] : %s (%s)"), *PropPath, Index, *DataInterface->GetName(), *DataInterface->GetClass()->GetName()));
-						}
-					}
-
-					continue;
-				}
-
-				if (const FStructProperty* ValueStructProp = CastField<FStructProperty>(MapProp->ValueProp))
-				{
-					for (int32 Index = 0; Index < MapHelper.Num(); ++Index)
-					{
-						if (!MapHelper.IsValidIndex(Index))
-						{
-							continue;
-						}
-
-						const uint8* PairPtr = MapHelper.GetPairPtr(Index);
-						const void* ValuePtr = MapProp->ValueProp->ContainerPtrToValuePtr<void>(PairPtr);
-						if (!ValuePtr)
-						{
-							continue;
-						}
-
-						const FString EntryPath = FString::Printf(TEXT("%s[%d]"), *PropPath, Index);
-						FindDataInterfacesInStruct(ValuePtr, ValueStructProp->Struct, EntryPath, OutEntries, Depth + 1);
-					}
-				}
-			}
-		}
 	}
 
 	void CollectDataInterfacesFromStruct(const void* StructPtr, const UStruct* StructType, TArray<UNiagaraDataInterface*>& OutDataInterfaces, int32 Depth)
@@ -2471,30 +2239,6 @@ namespace
 		}
 	}
 
-	void CollectCurveDataInterfacesFromGraph(UNiagaraGraph* Graph, TArray<UNiagaraDataInterface*>& OutDataInterfaces)
-	{
-		if (!Graph)
-		{
-			return;
-		}
-
-		for (UEdGraphNode* Node : Graph->Nodes)
-		{
-			if (!Node)
-			{
-				continue;
-			}
-
-			if (UNiagaraDataInterface* DataInterface = FindCurveDataInterfaceFromNode(Node))
-			{
-				if (HasCurveDataInterface(DataInterface))
-				{
-					OutDataInterfaces.AddUnique(DataInterface);
-				}
-			}
-		}
-	}
-
 	void CollectCurveDataInterfacesFromFunctionCall(UNiagaraNodeFunctionCall* FunctionNode, TArray<UNiagaraDataInterface*>& OutDataInterfaces)
 	{
 		if (!FunctionNode)
@@ -2561,35 +2305,6 @@ namespace
 			}
 
 			CollectCurveDataInterfacesFromFunctionCall(FunctionNode, OutDataInterfaces);
-		}
-	}
-
-	void CollectDynamicInputNodeDebug(UNiagaraNodeFunctionCall* FunctionNode, TArray<FString>& OutEntries)
-	{
-		if (!FunctionNode)
-		{
-			return;
-		}
-
-		UNiagaraGraph* CalledGraph = FunctionNode->GetCalledGraph();
-		if (!CalledGraph)
-		{
-			return;
-		}
-
-		TArray<UNiagaraNodeInput*> InputNodes;
-		CalledGraph->GetNodesOfClass(InputNodes);
-
-		for (UNiagaraNodeInput* InputNode : InputNodes)
-		{
-			if (!InputNode)
-			{
-				continue;
-			}
-
-			const FString InputName = InputNode->Input.GetName().ToString();
-			const FString InputType = InputNode->Input.GetType().GetName();
-			OutEntries.Add(FString::Printf(TEXT("%s : %s"), *InputName, *InputType));
 		}
 	}
 
@@ -3341,29 +3056,6 @@ namespace
 		MultiCurveObject->SetObjectField(TEXT("Curves"), CurvesObject);
 		InputsObject->SetObjectField(InputName, MultiCurveObject);
 		return true;
-	}
-
-	void CollectFunctionCallPinDebug(UNiagaraNodeFunctionCall* FunctionNode, TArray<FString>& OutEntries)
-	{
-		if (!FunctionNode)
-		{
-			return;
-		}
-
-		for (UEdGraphPin* Pin : FunctionNode->Pins)
-		{
-			if (!Pin)
-			{
-				continue;
-			}
-
-			const FString PinName = Pin->PinName.ToString();
-			const FString Direction = (Pin->Direction == EGPD_Input) ? TEXT("In") : TEXT("Out");
-			const FString DefaultObjName = Pin->DefaultObject ? Pin->DefaultObject->GetName() : TEXT("<null>");
-			const FString DefaultObjClass = Pin->DefaultObject ? Pin->DefaultObject->GetClass()->GetName() : TEXT("<null>");
-			OutEntries.Add(FString::Printf(TEXT("%s [%s] Default=%s (%s) Linked=%d"),
-				*PinName, *Direction, *DefaultObjName, *DefaultObjClass, Pin->LinkedTo.Num()));
-		}
 	}
 
 	void CollectDataInterfacesFromObjectDeep(const UObject* Owner, TArray<UNiagaraDataInterface*>& OutDataInterfaces)
@@ -4268,11 +3960,6 @@ bool AppendModuleSnapshots(UNiagaraScript* TargetModule, UNiagaraScript* SourceS
 				GatherInputNamesFromFunctionNode(FunctionNode, InputNames);
 			}
 			GatherInputNamesFromFunctionCallPins(FunctionNode, InputNames);
-			{
-				TArray<FString> InputNameList = InputNames.Array();
-				InputNameList.Sort();
-				AddDebugArrayField(InputsObject, TEXT("_DebugInputNames"), InputNameList);
-			}
 
 			TArray<FNiagaraVariable> RapidIterationVariables;
 			SourceScript->RapidIterationParameters.GetParameters(RapidIterationVariables);
@@ -4284,21 +3971,6 @@ bool AppendModuleSnapshots(UNiagaraScript* TargetModule, UNiagaraScript* SourceS
 			{
 				FunctionGraphCurveInterfaces = DynamicInputCurveInterfaces;
 			}
-			TArray<FString> FunctionCallPinDebug;
-			CollectFunctionCallPinDebug(FunctionNode, FunctionCallPinDebug);
-			AddDebugArrayField(InputsObject, TEXT("_DebugFunctionCallPins"), FunctionCallPinDebug);
-			TArray<FString> FunctionGraphCurveNames;
-			for (UNiagaraDataInterface* Interface : FunctionGraphCurveInterfaces)
-			{
-				if (Interface)
-				{
-					FunctionGraphCurveNames.Add(FString::Printf(TEXT("%s : %s"), *Interface->GetName(), *Interface->GetClass()->GetName()));
-				}
-			}
-			AddDebugArrayField(InputsObject, TEXT("_DebugFunctionGraphCurves"), FunctionGraphCurveNames);
-			TArray<FString> DynamicInputNodeDebug;
-			CollectDynamicInputNodeDebug(FunctionNode, DynamicInputNodeDebug);
-			AddDebugArrayField(InputsObject, TEXT("_DebugDynamicInputNodes"), DynamicInputNodeDebug);
 			GatherInputNamesFromRapidIteration(FunctionName, RapidIterationVariables, InputNames);
 			TArray<UNiagaraDataInterface*> OuterCurveInterfaces;
 			UObject* OuterOwner = nullptr;
@@ -4315,23 +3987,18 @@ bool AppendModuleSnapshots(UNiagaraScript* TargetModule, UNiagaraScript* SourceS
 				OuterOwner = ScriptSource;
 			}
 			CollectCurveInterfacesFromOuter(OuterOwner, OuterCurveInterfaces);
-			TArray<FString> UnresolvedInputs;
-			TArray<FString> UnresolvedInputTraces;
 			for (const FString& InputName : InputNames)
 			{
-				bool bHandled = false;
 				const bool bCurveHandled = TrySetDynamicInputCurveValue(FunctionNode, InputName, InputsObject, FunctionName, RapidIterationVariables,
 						SourceScript->RapidIterationParameters, OuterCurveInterfaces, SourceScript->GetPathName());
 				if (bCurveHandled)
 				{
-					bHandled = true;
 					continue;
 				}
 
 				const bool bStaticSwitchHandled = TrySetStaticSwitchValue(FunctionNode, InputName, InputsObject);
 				if (bStaticSwitchHandled)
 				{
-					bHandled = true;
 					continue;
 				}
 
@@ -4339,39 +4006,21 @@ bool AppendModuleSnapshots(UNiagaraScript* TargetModule, UNiagaraScript* SourceS
 						FallbackDataInterfaces, FunctionGraphCurveInterfaces, OuterCurveInterfaces);
 				if (bRapidHandled)
 				{
-					bHandled = true;
 					continue;
 				}
 
 				const bool bFunctionDefaultHandled = TrySetDefaultValueFromFunctionNode(FunctionNode, InputName, InputsObject);
 				if (bFunctionDefaultHandled)
 				{
-					bHandled = true;
 					continue;
 				}
 
 				const bool bModuleDefaultHandled = TrySetDefaultValueFromModuleScript(TargetModule, InputName, InputsObject);
 				if (bModuleDefaultHandled)
 				{
-					bHandled = true;
 					continue;
 				}
-
-				if (!bHandled)
-				{
-					UnresolvedInputs.Add(InputName);
-					const FString Trace = FString::Printf(TEXT("%s: Curve=%d StaticSwitch=%d Rapid=%d FunctionDefault=%d ModuleDefault=%d"),
-						*InputName,
-						bCurveHandled ? 1 : 0,
-						bStaticSwitchHandled ? 1 : 0,
-						bRapidHandled ? 1 : 0,
-						bFunctionDefaultHandled ? 1 : 0,
-						bModuleDefaultHandled ? 1 : 0);
-					UnresolvedInputTraces.Add(Trace);
-				}
 			}
-			AddDebugArrayField(InputsObject, TEXT("_DebugUnresolvedInputs"), UnresolvedInputs);
-			AddDebugArrayField(InputsObject, TEXT("_DebugUnresolvedInputTraces"), UnresolvedInputTraces);
 
 			if (InputsObject->Values.Num() == 0)
 			{
@@ -4617,51 +4266,4 @@ namespace
 		return false;
 	}
 }
-namespace
-{
-	void AddDebugModuleGraphValuePins(UNiagaraGraph* Graph, const TSharedPtr<FJsonObject>& InputsObject)
-	{
-		if (!Graph || !InputsObject.IsValid())
-		{
-			return;
-		}
 
-		TArray<FString> PinEntries;
-		for (UEdGraphNode* Node : Graph->Nodes)
-		{
-			if (!Node)
-			{
-				continue;
-			}
-
-			const FString NodeClass = Node->GetClass()->GetName();
-			if (!NodeClass.Contains(TEXT("ParameterMapGet")) && !NodeClass.Contains(TEXT("ParameterMapSet")))
-			{
-				continue;
-			}
-
-			for (UEdGraphPin* Pin : Node->Pins)
-			{
-				if (!Pin || Pin->bOrphanedPin)
-				{
-					continue;
-				}
-
-				if (Pin->PinType.PinSubCategoryObject == FNiagaraTypeDefinition::GetParameterMapStruct())
-				{
-					continue;
-				}
-
-				const FString Dir = (Pin->Direction == EGPD_Input) ? TEXT("In") : TEXT("Out");
-				const FString TypeName = Pin->PinType.PinSubCategoryObject.IsValid()
-					? Pin->PinType.PinSubCategoryObject->GetName()
-					: Pin->PinType.PinCategory.ToString();
-				const FString Def = GetPinDefaultString(Pin);
-				PinEntries.Add(FString::Printf(TEXT("%s %s %s Type=%s Default=%s"),
-					*NodeClass, *Dir, *Pin->PinName.ToString(), *TypeName, *Def));
-			}
-		}
-
-		AddDebugArrayField(InputsObject, TEXT("_DebugModuleGraphValuePins"), PinEntries);
-	}
-}
