@@ -1,4 +1,4 @@
-﻿#include "NiagaraModuleSnapShotProcessor.h"
+#include "NiagaraModuleSnapShotProcessor.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Dom/JsonObject.h"
@@ -37,8 +37,6 @@ namespace
 {
 	TSharedPtr<FJsonObject> BuildCurveKeyObject(const FRichCurveKey& Key);
 	TArray<TSharedPtr<FJsonValue>> BuildCurveKeysArray(const FRichCurve& Curve);
-	void AddDebugField(const TSharedPtr<FJsonObject>& InputsObject, const FString& Key, const FString& Value);
-	void AddDebugArrayField(const TSharedPtr<FJsonObject>& InputsObject, const FString& Key, const TArray<FString>& Values);
 	UNiagaraDataInterface* FindCurveDataInterfaceFromNode(const UEdGraphNode* Node);
 	UEdGraphPin* FindParameterMapSetInputPin(UEdGraphNode* SetNode, const FString& InputName, const FString& FunctionName);
 	void GatherDataInterfacesFromObject(const UObject* Owner, TArray<UNiagaraDataInterface*>& OutDataInterfaces);
@@ -383,7 +381,6 @@ namespace
 			const UScriptStruct* StoreStruct = FNiagaraParameterStore::StaticStruct();
 			if (!StoreStruct)
 			{
-				AddDebugField(InputsObject, TEXT("_DebugRapidStoreStruct"), TEXT("Missing"));
 				return false;
 			}
 
@@ -398,7 +395,6 @@ namespace
 					const int32 Num = MapHelper.Num();
 					const FString Suffix = TEXT(".") + InputName;
 					const FString FunctionToken = TEXT(".") + FunctionName + TEXT(".");
-					AddDebugField(InputsObject, TEXT("_DebugRapidOffsetsCount"), FString::FromInt(Num));
 
 					for (int32 Index = 0; Index < Num; ++Index)
 					{
@@ -437,8 +433,6 @@ namespace
 							return true;
 						}
 					}
-
-					AddDebugArrayField(InputsObject, TEXT("_DebugRapidOffsetsKeys"), OffsetKeys);
 				}
 			}
 
@@ -446,7 +440,6 @@ namespace
 			const FArrayProperty* DIsProp = FindFProperty<FArrayProperty>(StoreStruct, TEXT("DataInterfaces"));
 			if (!VarsProp || !DIsProp)
 			{
-				AddDebugField(InputsObject, TEXT("_DebugRapidDIProps"), TEXT("Missing"));
 				return false;
 			}
 
@@ -501,8 +494,6 @@ namespace
 					return true;
 				}
 			}
-
-			AddDebugArrayField(InputsObject, TEXT("_DebugRapidDIVariables"), DataInterfaceVarNames);
 			return false;
 		};
 
@@ -525,8 +516,6 @@ namespace
 			GatherRapidIterationDataInterfacesFromParameters(ExecutableData.Parameters, ExecParamInterfaces);
 			TArray<UNiagaraDataInterface*> ScriptInterfaces;
 			GatherDataInterfacesFromObject(SourceScript, ScriptInterfaces);
-			AddDebugField(InputsObject, TEXT("_DebugExecDIInfoCount"), FString::FromInt(ExecutableData.DataInterfaceInfo.Num()));
-			AddDebugField(InputsObject, TEXT("_DebugRapidInterfacesCount"), FString::FromInt(RapidInterfaces.Num()));
 
 			for (int32 Index = 0; Index < ExecutableData.DataInterfaceInfo.Num(); ++Index)
 			{
@@ -872,7 +861,6 @@ namespace
 					SuffixVars.Add(VariableName);
 				}
 			}
-			AddDebugArrayField(InputsObject, TEXT("_DebugRapidSuffixVars"), SuffixVars);
 
 			if (TrySetRapidIterationDataInterfaceByName(SourceScript->RapidIterationParameters))
 			{
@@ -900,7 +888,6 @@ namespace
 		const FNiagaraParameterStore& RapidIterationParameters = SourceScript->RapidIterationParameters;
 		if (RapidIterationParameters.IndexOf(*MatchedVariable) == INDEX_NONE)
 		{
-			AddDebugField(InputsObject, TEXT("_DebugRapidIndexMissing"), MatchedVariable->GetName().ToString());
 			return false;
 		}
 
@@ -909,7 +896,6 @@ namespace
 		{
 			const float Value = RapidIterationParameters.GetParameterValue<float>(*MatchedVariable);
 			InputsObject->SetNumberField(InputName, Value);
-			AddDebugField(InputsObject, TEXT("_DebugRapidSet"), MatchedVariable->GetName().ToString());
 			return true;
 		}
 
@@ -917,7 +903,6 @@ namespace
 		{
 			const int32 Value = RapidIterationParameters.GetParameterValue<int32>(*MatchedVariable);
 			InputsObject->SetNumberField(InputName, Value);
-			AddDebugField(InputsObject, TEXT("_DebugRapidSet"), MatchedVariable->GetName().ToString());
 			return true;
 		}
 
@@ -926,7 +911,6 @@ namespace
 			const FNiagaraBool Value = RapidIterationParameters.GetParameterValue<FNiagaraBool>(*MatchedVariable);
 			const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Bool"));
 			InputsObject->SetBoolField(FieldName, Value.GetValue());
-			AddDebugField(InputsObject, TEXT("_DebugRapidSet"), MatchedVariable->GetName().ToString());
 			return true;
 		}
 
@@ -937,7 +921,6 @@ namespace
 			VecObject->SetNumberField(TEXT("X"), Value.X);
 			VecObject->SetNumberField(TEXT("Y"), Value.Y);
 			InputsObject->SetObjectField(InputName, VecObject);
-			AddDebugField(InputsObject, TEXT("_DebugRapidSet"), MatchedVariable->GetName().ToString());
 			return true;
 		}
 
@@ -949,7 +932,6 @@ namespace
 			VecObject->SetNumberField(TEXT("Y"), Value.Y);
 			VecObject->SetNumberField(TEXT("Z"), Value.Z);
 			InputsObject->SetObjectField(InputName, VecObject);
-			AddDebugField(InputsObject, TEXT("_DebugRapidSet"), MatchedVariable->GetName().ToString());
 			return true;
 		}
 
@@ -962,7 +944,6 @@ namespace
 			VecObject->SetNumberField(TEXT("Z"), Value.Z);
 			VecObject->SetNumberField(TEXT("W"), Value.W);
 			InputsObject->SetObjectField(InputName, VecObject);
-			AddDebugField(InputsObject, TEXT("_DebugRapidSet"), MatchedVariable->GetName().ToString());
 			return true;
 		}
 
@@ -976,7 +957,6 @@ namespace
 			ColorObject->SetNumberField(TEXT("A"), Value.A);
 			const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Color"));
 			InputsObject->SetObjectField(FieldName, ColorObject);
-			AddDebugField(InputsObject, TEXT("_DebugRapidSet"), MatchedVariable->GetName().ToString());
 			return true;
 		}
 
@@ -987,7 +967,6 @@ namespace
 			{
 				TryOverrideCurveScale(FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, CurveObject);
 				InputsObject->SetObjectField(InputName, CurveObject);
-				AddDebugField(InputsObject, TEXT("_DebugRapidSetDI"), MatchedVariable->GetName().ToString());
 				return true;
 			}
 		}
@@ -1035,16 +1014,6 @@ namespace
 			KeysArray.Add(MakeShared<FJsonValueObject>(BuildCurveKeyObject(Key)));
 		}
 		return KeysArray;
-	}
-
-	void AddDebugField(const TSharedPtr<FJsonObject>& InputsObject, const FString& Key, const FString& Value)
-	{
-		return;
-	}
-
-	void AddDebugArrayField(const TSharedPtr<FJsonObject>& InputsObject, const FString& Key, const TArray<FString>& Values)
-	{
-		return;
 	}
 
 	FString GetUniqueInputFieldName(const TSharedPtr<FJsonObject>& InputsObject, const FString& InputName, const FString& Suffix)
@@ -1261,7 +1230,6 @@ namespace
 
 		const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Bool"));
 		InputsObject->SetBoolField(FieldName, bValue);
-		AddDebugField(InputsObject, TEXT("_DebugBoolFromPin"), Pin->PinName.ToString());
 		return true;
 	}
 
@@ -1463,7 +1431,6 @@ namespace
 			{
 				const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Bool"));
 				InputsObject->SetBoolField(FieldName, bBoolValue);
-				AddDebugField(InputsObject, TEXT("_DebugDefaultFromCalledGraph"), FullName);
 				return true;
 			}
 
@@ -1476,7 +1443,6 @@ namespace
 				ColorObject->SetNumberField(TEXT("B"), Value.B);
 				ColorObject->SetNumberField(TEXT("A"), Value.A);
 				InputsObject->SetObjectField(InputName, ColorObject);
-				AddDebugField(InputsObject, TEXT("_DebugDefaultFromCalledGraph"), FullName);
 				return true;
 			}
 		}
@@ -1536,8 +1502,6 @@ namespace
 		UEdGraphPin* DefaultPin = ValueInputPins[OutputIndex];
 		if (TrySetDefaultValueFromPin(DefaultPin, InputName, InputsObject))
 		{
-			AddDebugField(InputsObject, TEXT("_DebugDefaultFromModule"), TEXT("ParameterMapGetIndexedInput"));
-			AddDebugField(InputsObject, TEXT("_DebugParameterMapGetMatchedPin"), DefaultPin->PinName.ToString());
 			return true;
 		}
 
@@ -1548,17 +1512,14 @@ namespace
 	{
 		if (!ModuleScript || !InputsObject.IsValid() || InputName.IsEmpty())
 		{
-			AddDebugField(InputsObject, TEXT("_DebugModuleDefaultStage"), TEXT("InvalidArgs"));
 			return false;
 		}
 
 		UNiagaraScriptSource* ModuleSource = Cast<UNiagaraScriptSource>(ModuleScript->GetLatestSource());
 		if (!ModuleSource || !ModuleSource->NodeGraph)
 		{
-			AddDebugField(InputsObject, TEXT("_DebugModuleDefaultStage"), TEXT("NoModuleSourceOrGraph"));
 			return false;
 		}
-		AddDebugField(InputsObject, TEXT("_DebugModuleDefaultStage"), TEXT("Begin"));
 
 		for (UEdGraphNode* Node : ModuleSource->NodeGraph->Nodes)
 		{
@@ -1575,7 +1536,6 @@ namespace
 
 			if (TrySetDefaultValueFromPin(Pin, InputName, InputsObject))
 			{
-				AddDebugField(InputsObject, TEXT("_DebugModuleDefaultStage"), TEXT("ParameterMapSet"));
 				return true;
 			}
 		}
@@ -1589,7 +1549,6 @@ namespace
 
 			if (TrySetDefaultValueFromParameterMapGetNode(Node, InputName, InputsObject))
 			{
-				AddDebugField(InputsObject, TEXT("_DebugModuleDefaultStage"), TEXT("ParameterMapGetIndexedInput"));
 				return true;
 			}
 
@@ -1601,8 +1560,6 @@ namespace
 
 			if (TrySetDefaultValueFromPin(Pin, InputName, InputsObject))
 			{
-				AddDebugField(InputsObject, TEXT("_DebugDefaultFromModule"), TEXT("ParameterMapGet"));
-				AddDebugField(InputsObject, TEXT("_DebugModuleDefaultStage"), TEXT("ParameterMapGet"));
 				return true;
 			}
 		}
@@ -1641,8 +1598,6 @@ namespace
 					|| NormalizeInputToken(FullName).EndsWith(NormalizeInputToken(InputName)))
 				{
 					InputsObject->SetBoolField(FieldName, bBoolValue);
-					AddDebugField(InputsObject, TEXT("_DebugDefaultFromModule"), TEXT("NodeInput"));
-					AddDebugField(InputsObject, TEXT("_DebugModuleDefaultStage"), TEXT("NodeInput"));
 					return true;
 				}
 			}
@@ -1656,8 +1611,6 @@ namespace
 				ColorObject->SetNumberField(TEXT("B"), Value.B);
 				ColorObject->SetNumberField(TEXT("A"), Value.A);
 				InputsObject->SetObjectField(InputName, ColorObject);
-				AddDebugField(InputsObject, TEXT("_DebugDefaultFromModule"), TEXT("NodeInput"));
-				AddDebugField(InputsObject, TEXT("_DebugModuleDefaultStage"), TEXT("NodeInput"));
 				return true;
 			}
 		}
@@ -1666,24 +1619,18 @@ namespace
 		{
 			const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Bool"));
 			InputsObject->SetBoolField(FieldName, BoolCandidates[0].Value);
-			AddDebugField(InputsObject, TEXT("_DebugDefaultFromModule"), TEXT("NodeInputSingleBoolFallback"));
-			AddDebugField(InputsObject, TEXT("_DebugModuleDefaultStage"), TEXT("NodeInputSingleBoolFallback"));
 			return true;
 		}
 
 		if (TrySetDefaultValueFromModuleRapidIteration(ModuleScript, InputName, InputsObject))
 		{
-			AddDebugField(InputsObject, TEXT("_DebugModuleDefaultStage"), TEXT("ModuleRapidIteration"));
 			return true;
 		}
 
 		if (TrySetDefaultValueFromGraphMetadata(ModuleSource->NodeGraph, InputName, InputsObject))
 		{
-			AddDebugField(InputsObject, TEXT("_DebugModuleDefaultStage"), TEXT("GraphMetadata"));
 			return true;
 		}
-
-		AddDebugField(InputsObject, TEXT("_DebugModuleDefaultStage"), TEXT("NotFound"));
 		return false;
 	}
 
@@ -1868,17 +1815,10 @@ namespace
 
 				if (TrySetDefaultFromMetadataStruct(ValuePtr, ValueStructProp->Struct, InputName, InputsObject, 0))
 				{
-					AddDebugField(InputsObject, TEXT("_DebugDefaultFromModule"), TEXT("GraphMetadata"));
-					AddDebugField(InputsObject, TEXT("_DebugMetadataVar"), VarName);
 					return true;
 				}
 			}
 		}
-
-		AddDebugField(InputsObject, TEXT("_DebugGraphMetadataMapCount"), FString::FromInt(MetadataMapCount));
-		AddDebugArrayField(InputsObject, TEXT("_DebugGraphMetadataMapInfo"), MetadataMapInfo);
-		AddDebugArrayField(InputsObject, TEXT("_DebugGraphMetadataMapSizes"), MetadataMapSizes);
-		AddDebugArrayField(InputsObject, TEXT("_DebugGraphMetadataKeys"), MetadataKeyHits);
 		return false;
 	}
 
@@ -1928,8 +1868,6 @@ namespace
 		const FNiagaraBool Value = ModuleScript->RapidIterationParameters.GetParameterValue<FNiagaraBool>(*BestBoolVar);
 		const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Bool"));
 		InputsObject->SetBoolField(FieldName, Value.GetValue());
-		AddDebugField(InputsObject, TEXT("_DebugDefaultFromModule"), TEXT("ModuleRapidIteration"));
-		AddDebugField(InputsObject, TEXT("_DebugModuleRapidSet"), BestBoolVar->GetName().ToString());
 		return true;
 	}
 
@@ -2491,11 +2429,8 @@ namespace
 		{
 			const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Bool"));
 			InputsObject->SetBoolField(FieldName, bBestMatchValue);
-			AddDebugField(InputsObject, TEXT("_DebugStaticSwitchSet"), BestMatchVarName);
 			return true;
 		}
-
-		AddDebugArrayField(InputsObject, TEXT("_DebugStaticSwitchVars"), SwitchDebug);
 		return false;
 	}
 
@@ -2916,7 +2851,6 @@ namespace
 
 			TArray<UNiagaraDataInterface*> DynamicCurveInterfaces;
 			CollectCurveDataInterfacesFromFunctionCall(FunctionNode, DynamicCurveInterfaces);
-			AddDebugField(InputsObject, TEXT("_DebugDynamicInputCurveCount"), FString::FromInt(DynamicCurveInterfaces.Num()));
 			TArray<FString> DynamicCurveClasses;
 			for (UNiagaraDataInterface* Interface : DynamicCurveInterfaces)
 			{
@@ -2925,7 +2859,6 @@ namespace
 					DynamicCurveClasses.Add(Interface->GetClass()->GetName());
 				}
 			}
-			AddDebugArrayField(InputsObject, TEXT("_DebugDynamicInputCurveClasses"), DynamicCurveClasses);
 			if (DynamicCurveInterfaces.Num() == 1)
 			{
 				if (TSharedPtr<FJsonObject> CurveObject = BuildCurveObjectFromDataInterface(DynamicCurveInterfaces[0]))
@@ -2991,7 +2924,6 @@ namespace
 
 		TArray<UNiagaraDataInterface*> DeepInterfaces;
 		CollectDataInterfacesFromObjectDeep(FunctionNode, DeepInterfaces);
-		AddDebugField(InputsObject, TEXT("_DebugFunctionCallDIsCount"), FString::FromInt(DeepInterfaces.Num()));
 		TArray<FString> DeepInterfaceNames;
 		for (UNiagaraDataInterface* Interface : DeepInterfaces)
 		{
@@ -3007,10 +2939,8 @@ namespace
 				DeepInterfaceNames.Add(FString::Printf(TEXT("%s : %s"), *Interface->GetName(), *Interface->GetClass()->GetName()));
 			}
 		}
-		AddDebugArrayField(InputsObject, TEXT("_DebugFunctionCallDIs"), DeepInterfaceNames);
 		if (DeepInterfaceNames.Num() == 0)
 		{
-			AddDebugField(InputsObject, TEXT("_DebugFunctionCallDIs"), TEXT("<empty>"));
 		}
 
 		if (CurveMap.Num() == 0)
@@ -3625,11 +3555,8 @@ namespace
 		TArray<FString> BoolPinDebug;
 
 		UEdGraphPin* InputPin = FindFunctionInputPin(FunctionNode, InputName);
-		AddDebugField(InputsObject, TEXT("_DebugInputPinFound"), InputPin ? TEXT("1") : TEXT("0"));
 		if (InputPin)
 		{
-			AddDebugField(InputsObject, TEXT("_DebugInputPinName"), InputPin->PinName.ToString());
-			AddDebugField(InputsObject, TEXT("_DebugInputPinLinks"), FString::FromInt(InputPin->LinkedTo.Num()));
 		}
 
 		auto TrySetFromLinkedPins = [&](const TArray<UEdGraphPin*>& LinkedPins)
@@ -3655,8 +3582,6 @@ namespace
 				{
 					continue;
 				}
-
-				AddDebugField(InputsObject, TEXT("_DebugLinkedDIClass"), DataInterface->GetClass()->GetName());
 				if (TSharedPtr<FJsonObject> CurveObject = BuildCurveObjectFromDataInterface(DataInterface))
 				{
 					TryOverrideCurveScale(FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, CurveObject);
@@ -3850,8 +3775,6 @@ namespace
 				}
 			}
 		}
-
-		AddDebugArrayField(InputsObject, TEXT("_DebugBoolPins"), BoolPinDebug);
 		return false;
 	}
 
@@ -4266,4 +4189,5 @@ namespace
 		return false;
 	}
 }
+
 
