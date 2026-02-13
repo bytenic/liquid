@@ -50,7 +50,11 @@ namespace
 	void CollectCurveDataInterfacesFromFunctionCall(UNiagaraNodeFunctionCall* FunctionNode, TArray<UNiagaraDataInterface*>& OutDataInterfaces);
 	void CollectCurveDataInterfacesFromDynamicInputs(UNiagaraGraph* Graph, TArray<UNiagaraDataInterface*>& OutDataInterfaces);
 	void CollectDynamicInputNodeDebug(UNiagaraNodeFunctionCall* FunctionNode, TArray<FString>& OutEntries);
+	void GatherInputNamesFromFunctionCallPins(UNiagaraNodeFunctionCall* FunctionNode, TSet<FString>& OutInputNames);
+	void GatherInputNamesFromRapidIteration(const FString& FunctionName, const TArray<FNiagaraVariable>& RapidIterationVariables, TSet<FString>& OutInputNames);
 	TSharedPtr<FJsonObject> BuildCurveObjectFromDataInterface(UNiagaraDataInterface* DataInterface);
+	UEdGraphPin* FindFunctionInputPin(UNiagaraNodeFunctionCall* FunctionNode, const FString& InputName);
+	bool TrySetStaticSwitchValue(UNiagaraNodeFunctionCall* FunctionNode, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject);
 	struct FCurveChannel;
 	void CollectCurveChannelsFromStruct(const void* StructPtr, const UStruct* StructType, int32 Depth, TArray<FCurveChannel>& OutChannels);
 	bool GetCurveChannelsFromDataInterface(UNiagaraDataInterface* DataInterface, TArray<FCurveChannel>& OutChannels);
@@ -71,6 +75,24 @@ namespace
 	bool TrySetDynamicInputCurveValue(UNiagaraNodeFunctionCall* FunctionNode, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject,
 		const FString& FunctionName, const TArray<FNiagaraVariable>& RapidIterationVariables, const FNiagaraParameterStore& RapidIterationParameters,
 		const TArray<UNiagaraDataInterface*>& OuterCurveInterfaces, const FString& SourceScriptPath);
+	FString GetUniqueInputFieldName(const TSharedPtr<FJsonObject>& InputsObject, const FString& InputName, const FString& Suffix);
+	bool TrySetBoolFromPin(UEdGraphPin* Pin, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject);
+	bool TrySetDefaultValueFromPin(UEdGraphPin* Pin, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject);
+	bool TrySetDefaultValueFromFunctionNode(UNiagaraNodeFunctionCall* FunctionNode, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject);
+	bool TrySetDefaultValueFromModuleScript(UNiagaraScript* ModuleScript, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject);
+	bool TrySetDefaultValueFromModuleRapidIteration(UNiagaraScript* ModuleScript, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject);
+	bool TrySetDefaultValueFromGraphMetadata(UNiagaraGraph* Graph, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject);
+	bool TrySetDefaultValueFromParameterMapGetNode(UEdGraphNode* GetNode, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject);
+	void AddDebugModuleGraphValuePins(UNiagaraGraph* Graph, const TSharedPtr<FJsonObject>& InputsObject);
+	UEdGraphPin* FindParameterMapGetValuePin(UEdGraphNode* GetNode, const FString& InputName);
+	FString GetPinDefaultString(UEdGraphPin* Pin);
+	bool TrySetDefaultValueFromCalledGraphInputs(UNiagaraNodeFunctionCall* FunctionNode, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject);
+	bool IsBoolPinType(const UEdGraphPin* Pin);
+	bool TryReadBoolFromNiagaraVariable(const FNiagaraVariable& Variable, bool& OutValue);
+	FString NormalizeInputToken(const FString& In);
+	bool IsSameInputToken(const FString& A, const FString& B);
+	bool TrySetDefaultFromMetadataStruct(const void* StructPtr, const UStruct* StructType, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject, int32 Depth);
+	bool TryExtractVariableLikeName(const void* KeyPtr, const FProperty* KeyProp, FString& OutName);
 
 	UEdGraphPin* FindParameterMapInputPin(const UEdGraphNode& Node)
 	{
@@ -770,6 +792,42 @@ namespace
 
 		if (!MatchedVariable)
 		{
+			// Fallback: function-token segment may differ depending on how the stack item was renamed.
+			for (const FNiagaraVariable& Variable : RapidIterationVariables)
+			{
+				const FString VariableName = Variable.GetName().ToString();
+				if (!VariableName.EndsWith(Suffix))
+				{
+					continue;
+				}
+
+				int32 Score = VariableName.Len();
+				if (VariableName.Contains(FunctionToken, ESearchCase::CaseSensitive, ESearchDir::FromStart))
+				{
+					Score += 1000;
+				}
+
+				if (Score > BestScore)
+				{
+					BestScore = Score;
+					MatchedVariable = &Variable;
+				}
+			}
+		}
+
+		if (!MatchedVariable)
+		{
+			TArray<FString> SuffixVars;
+			for (const FNiagaraVariable& Variable : RapidIterationVariables)
+			{
+				const FString VariableName = Variable.GetName().ToString();
+				if (VariableName.EndsWith(Suffix))
+				{
+					SuffixVars.Add(VariableName);
+				}
+			}
+			AddDebugArrayField(InputsObject, TEXT("_DebugRapidSuffixVars"), SuffixVars);
+
 			if (TrySetRapidIterationDataInterfaceByName(SourceScript->RapidIterationParameters))
 			{
 				return true;
@@ -820,7 +878,8 @@ namespace
 		if (InputType == FNiagaraTypeDefinition::GetBoolDef())
 		{
 			const FNiagaraBool Value = RapidIterationParameters.GetParameterValue<FNiagaraBool>(*MatchedVariable);
-			InputsObject->SetBoolField(InputName, Value.GetValue());
+			const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Bool"));
+			InputsObject->SetBoolField(FieldName, Value.GetValue());
 			AddDebugField(InputsObject, TEXT("_DebugRapidSet"), MatchedVariable->GetName().ToString());
 			return true;
 		}
@@ -857,6 +916,20 @@ namespace
 			VecObject->SetNumberField(TEXT("Z"), Value.Z);
 			VecObject->SetNumberField(TEXT("W"), Value.W);
 			InputsObject->SetObjectField(InputName, VecObject);
+			AddDebugField(InputsObject, TEXT("_DebugRapidSet"), MatchedVariable->GetName().ToString());
+			return true;
+		}
+
+		if (InputType == FNiagaraTypeDefinition::GetColorDef())
+		{
+			const FLinearColor Value = RapidIterationParameters.GetParameterValue<FLinearColor>(*MatchedVariable);
+			TSharedPtr<FJsonObject> ColorObject = MakeShared<FJsonObject>();
+			ColorObject->SetNumberField(TEXT("R"), Value.R);
+			ColorObject->SetNumberField(TEXT("G"), Value.G);
+			ColorObject->SetNumberField(TEXT("B"), Value.B);
+			ColorObject->SetNumberField(TEXT("A"), Value.A);
+			const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Color"));
+			InputsObject->SetObjectField(FieldName, ColorObject);
 			AddDebugField(InputsObject, TEXT("_DebugRapidSet"), MatchedVariable->GetName().ToString());
 			return true;
 		}
@@ -950,6 +1023,974 @@ namespace
 		}
 
 		InputsObject->SetArrayField(Key, JsonValues);
+	}
+
+	FString GetUniqueInputFieldName(const TSharedPtr<FJsonObject>& InputsObject, const FString& InputName, const FString& Suffix)
+	{
+		if (!InputsObject.IsValid())
+		{
+			return InputName;
+		}
+
+		if (!InputsObject->HasField(InputName))
+		{
+			return InputName;
+		}
+
+		FString Candidate = Suffix.IsEmpty()
+			? FString::Printf(TEXT("%s_Alt"), *InputName)
+			: FString::Printf(TEXT("%s_%s"), *InputName, *Suffix);
+		if (!InputsObject->HasField(Candidate))
+		{
+			return Candidate;
+		}
+
+		int32 Index = 1;
+		FString IndexedCandidate = Candidate;
+		while (InputsObject->HasField(IndexedCandidate))
+		{
+			IndexedCandidate = FString::Printf(TEXT("%s_%d"), *Candidate, Index++);
+		}
+
+		return IndexedCandidate;
+	}
+
+	FString NormalizeInputToken(const FString& In)
+	{
+		FString Out;
+		Out.Reserve(In.Len());
+		for (TCHAR Ch : In)
+		{
+			if (FChar::IsAlnum(Ch))
+			{
+				Out.AppendChar(FChar::ToLower(Ch));
+			}
+		}
+		return Out;
+	}
+
+	bool IsSameInputToken(const FString& A, const FString& B)
+	{
+		if (A == B)
+		{
+			return true;
+		}
+
+		const FString NA = NormalizeInputToken(A);
+		const FString NB = NormalizeInputToken(B);
+		return !NA.IsEmpty() && NA == NB;
+	}
+
+	bool IsBoolPinType(const UEdGraphPin* Pin)
+	{
+		if (!Pin)
+		{
+			return false;
+		}
+
+		const UStruct* BoolStruct = FNiagaraTypeDefinition::GetBoolDef().GetStruct();
+		if (Pin->PinType.PinSubCategoryObject == BoolStruct)
+		{
+			return true;
+		}
+
+		const FString PinCategory = Pin->PinType.PinCategory.ToString();
+		return PinCategory.Equals(TEXT("bool"), ESearchCase::IgnoreCase)
+			|| PinCategory.Equals(TEXT("boolean"), ESearchCase::IgnoreCase);
+	}
+
+	bool TryReadBoolFromNiagaraVariable(const FNiagaraVariable& Variable, bool& OutValue)
+	{
+		const FNiagaraTypeDefinition Type = Variable.GetType();
+		const FString TypeName = Type.GetName();
+		const bool bBoolNamed = TypeName.Contains(TEXT("Bool"), ESearchCase::IgnoreCase);
+
+		const int32 Size = Variable.GetSizeInBytes();
+		const uint8* Data = Variable.GetData();
+		if (!Data || Size <= 0)
+		{
+			return false;
+		}
+
+		if (bBoolNamed && Size == sizeof(FNiagaraBool))
+		{
+			const FNiagaraBool* BoolValue = reinterpret_cast<const FNiagaraBool*>(Data);
+			OutValue = BoolValue && BoolValue->GetValue();
+			return true;
+		}
+
+		if (bBoolNamed && Size == sizeof(bool))
+		{
+			OutValue = (*reinterpret_cast<const bool*>(Data) != 0);
+			return true;
+		}
+
+		if (bBoolNamed && Size == sizeof(uint8))
+		{
+			OutValue = (*reinterpret_cast<const uint8*>(Data) != 0);
+			return true;
+		}
+
+		if (bBoolNamed && Size == sizeof(int32))
+		{
+			OutValue = (*reinterpret_cast<const int32*>(Data) != 0);
+			return true;
+		}
+
+		// Fallback for engine variants that do not expose a "Bool" typename.
+		if (!bBoolNamed && (Size == sizeof(uint8) || Size == sizeof(bool)))
+		{
+			OutValue = (*reinterpret_cast<const uint8*>(Data) != 0);
+			return true;
+		}
+
+		if (bBoolNamed)
+		{
+			bool bAnyNonZero = false;
+			for (int32 Index = 0; Index < Size; ++Index)
+			{
+				if (Data[Index] != 0)
+				{
+					bAnyNonZero = true;
+					break;
+				}
+			}
+			OutValue = bAnyNonZero;
+			return true;
+		}
+
+		return false;
+	}
+
+	FString GetPinDefaultString(UEdGraphPin* Pin)
+	{
+		if (!Pin)
+		{
+			return FString();
+		}
+
+		if (!Pin->DefaultValue.IsEmpty())
+		{
+			return Pin->DefaultValue;
+		}
+
+		if (!Pin->AutogeneratedDefaultValue.IsEmpty())
+		{
+			return Pin->AutogeneratedDefaultValue;
+		}
+
+		const FString TextDefault = Pin->DefaultTextValue.ToString();
+		if (!TextDefault.IsEmpty())
+		{
+			return TextDefault;
+		}
+
+		return Pin->GetDefaultAsString();
+	}
+
+	bool TrySetBoolFromPin(UEdGraphPin* Pin, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject)
+	{
+		if (!Pin || !InputsObject.IsValid() || InputName.IsEmpty())
+		{
+			return false;
+		}
+
+		if (!IsBoolPinType(Pin))
+		{
+			return false;
+		}
+
+		const FString DefaultValue = GetPinDefaultString(Pin);
+		if (DefaultValue.IsEmpty())
+		{
+			return false;
+		}
+
+		const FString Normalized = DefaultValue.TrimStartAndEnd().ToLower();
+		bool bValue = false;
+		if (Normalized == TEXT("true") || Normalized == TEXT("1"))
+		{
+			bValue = true;
+		}
+		else if (Normalized == TEXT("false") || Normalized == TEXT("0"))
+		{
+			bValue = false;
+		}
+		else if (Normalized.Contains(TEXT("true"), ESearchCase::IgnoreCase, ESearchDir::FromStart))
+		{
+			bValue = true;
+		}
+		else if (Normalized.Contains(TEXT("false"), ESearchCase::IgnoreCase, ESearchDir::FromStart))
+		{
+			bValue = false;
+		}
+		else if (Normalized.Contains(TEXT("value=1"), ESearchCase::IgnoreCase, ESearchDir::FromStart))
+		{
+			bValue = true;
+		}
+		else if (Normalized.Contains(TEXT("value=0"), ESearchCase::IgnoreCase, ESearchDir::FromStart))
+		{
+			bValue = false;
+		}
+		else
+		{
+			return false;
+		}
+
+		const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Bool"));
+		InputsObject->SetBoolField(FieldName, bValue);
+		AddDebugField(InputsObject, TEXT("_DebugBoolFromPin"), Pin->PinName.ToString());
+		return true;
+	}
+
+	bool TrySetDefaultValueFromPin(UEdGraphPin* Pin, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject)
+	{
+		if (!Pin || !InputsObject.IsValid() || InputName.IsEmpty())
+		{
+			return false;
+		}
+
+		if (InputsObject->HasField(InputName))
+		{
+			return false;
+		}
+
+		if (TrySetBoolFromPin(Pin, InputName, InputsObject))
+		{
+			return true;
+		}
+
+		const FString DefaultValue = GetPinDefaultString(Pin);
+		if (DefaultValue.IsEmpty())
+		{
+			return false;
+		}
+
+		const UStruct* PinStruct = Cast<UStruct>(Pin->PinType.PinSubCategoryObject.Get());
+		const FString PinCategory = Pin->PinType.PinCategory.ToString();
+		const bool bIsFloatCategory =
+			PinCategory.Equals(TEXT("float"), ESearchCase::IgnoreCase) ||
+			PinCategory.Equals(TEXT("real"), ESearchCase::IgnoreCase);
+		const bool bIsIntCategory =
+			PinCategory.Equals(TEXT("int"), ESearchCase::IgnoreCase) ||
+			PinCategory.Equals(TEXT("integer"), ESearchCase::IgnoreCase);
+		if (PinStruct == FNiagaraTypeDefinition::GetFloatDef().GetStruct())
+		{
+			float Value = 0.0f;
+			if (LexTryParseString(Value, *DefaultValue))
+			{
+				InputsObject->SetNumberField(InputName, Value);
+				return true;
+			}
+		}
+		else if (PinStruct == FNiagaraTypeDefinition::GetIntDef().GetStruct())
+		{
+			int32 Value = 0;
+			if (LexTryParseString(Value, *DefaultValue))
+			{
+				InputsObject->SetNumberField(InputName, Value);
+				return true;
+			}
+		}
+		else if (bIsFloatCategory)
+		{
+			float Value = 0.0f;
+			if (LexTryParseString(Value, *DefaultValue))
+			{
+				InputsObject->SetNumberField(InputName, Value);
+				return true;
+			}
+		}
+		else if (bIsIntCategory)
+		{
+			int32 Value = 0;
+			if (LexTryParseString(Value, *DefaultValue))
+			{
+				InputsObject->SetNumberField(InputName, Value);
+				return true;
+			}
+		}
+		else if (PinStruct == FNiagaraTypeDefinition::GetVec2Def().GetStruct())
+		{
+			FVector2D Vec;
+			if (Vec.InitFromString(DefaultValue))
+			{
+				TSharedPtr<FJsonObject> VecObject = MakeShared<FJsonObject>();
+				VecObject->SetNumberField(TEXT("X"), Vec.X);
+				VecObject->SetNumberField(TEXT("Y"), Vec.Y);
+				InputsObject->SetObjectField(InputName, VecObject);
+				return true;
+			}
+		}
+		else if (PinStruct == FNiagaraTypeDefinition::GetVec3Def().GetStruct())
+		{
+			FVector Vec;
+			if (Vec.InitFromString(DefaultValue))
+			{
+				TSharedPtr<FJsonObject> VecObject = MakeShared<FJsonObject>();
+				VecObject->SetNumberField(TEXT("X"), Vec.X);
+				VecObject->SetNumberField(TEXT("Y"), Vec.Y);
+				VecObject->SetNumberField(TEXT("Z"), Vec.Z);
+				InputsObject->SetObjectField(InputName, VecObject);
+				return true;
+			}
+		}
+		else if (PinStruct == FNiagaraTypeDefinition::GetVec4Def().GetStruct())
+		{
+			FVector4 Vec;
+			if (Vec.InitFromString(DefaultValue))
+			{
+				TSharedPtr<FJsonObject> VecObject = MakeShared<FJsonObject>();
+				VecObject->SetNumberField(TEXT("X"), Vec.X);
+				VecObject->SetNumberField(TEXT("Y"), Vec.Y);
+				VecObject->SetNumberField(TEXT("Z"), Vec.Z);
+				VecObject->SetNumberField(TEXT("W"), Vec.W);
+				InputsObject->SetObjectField(InputName, VecObject);
+				return true;
+			}
+		}
+		else if (PinStruct == FNiagaraTypeDefinition::GetColorDef().GetStruct())
+		{
+			FLinearColor Color;
+			if (Color.InitFromString(DefaultValue))
+			{
+				TSharedPtr<FJsonObject> ColorObject = MakeShared<FJsonObject>();
+				ColorObject->SetNumberField(TEXT("R"), Color.R);
+				ColorObject->SetNumberField(TEXT("G"), Color.G);
+				ColorObject->SetNumberField(TEXT("B"), Color.B);
+				ColorObject->SetNumberField(TEXT("A"), Color.A);
+				InputsObject->SetObjectField(InputName, ColorObject);
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	bool TrySetDefaultValueFromFunctionNode(UNiagaraNodeFunctionCall* FunctionNode, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject)
+	{
+		if (!FunctionNode || !InputsObject.IsValid() || InputName.IsEmpty())
+		{
+			return false;
+		}
+
+		if (UEdGraphPin* InputPin = FindFunctionInputPin(FunctionNode, InputName))
+		{
+			if (TrySetDefaultValueFromPin(InputPin, InputName, InputsObject))
+			{
+				return true;
+			}
+		}
+
+		if (UNiagaraGraph* OwnerGraph = Cast<UNiagaraGraph>(FunctionNode->GetGraph()))
+		{
+			if (UEdGraphPin* GraphSetPin = FindParameterMapSetInputPinInGraph(OwnerGraph, InputName, FunctionNode->GetFunctionName()))
+			{
+				if (TrySetDefaultValueFromPin(GraphSetPin, InputName, InputsObject))
+				{
+					return true;
+				}
+			}
+		}
+
+		if (TrySetDefaultValueFromCalledGraphInputs(FunctionNode, InputName, InputsObject))
+		{
+			return true;
+		}
+
+		return false;
+	}
+
+	bool TrySetDefaultValueFromCalledGraphInputs(UNiagaraNodeFunctionCall* FunctionNode, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject)
+	{
+		if (!FunctionNode || !InputsObject.IsValid() || InputName.IsEmpty())
+		{
+			return false;
+		}
+
+		UNiagaraGraph* CalledGraph = FunctionNode->GetCalledGraph();
+		if (!CalledGraph)
+		{
+			return false;
+		}
+
+		TArray<UNiagaraNodeInput*> InputNodes;
+		CalledGraph->GetNodesOfClass(InputNodes);
+		for (UNiagaraNodeInput* InputNode : InputNodes)
+		{
+			if (!InputNode)
+			{
+				continue;
+			}
+
+			const FString FullName = InputNode->Input.GetName().ToString();
+			int32 DotIndex = INDEX_NONE;
+			const FString SimplifiedName = FullName.FindLastChar(TEXT('.'), DotIndex)
+				? FullName.Mid(DotIndex + 1)
+				: FullName;
+			if (!IsSameInputToken(SimplifiedName, InputName)
+				&& !IsSameInputToken(FullName, InputName)
+				&& !NormalizeInputToken(FullName).EndsWith(NormalizeInputToken(InputName)))
+			{
+				continue;
+			}
+
+			const FNiagaraTypeDefinition InputType = InputNode->Input.GetType();
+			bool bBoolValue = false;
+			if (TryReadBoolFromNiagaraVariable(InputNode->Input, bBoolValue))
+			{
+				const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Bool"));
+				InputsObject->SetBoolField(FieldName, bBoolValue);
+				AddDebugField(InputsObject, TEXT("_DebugDefaultFromCalledGraph"), FullName);
+				return true;
+			}
+
+			if (InputType == FNiagaraTypeDefinition::GetColorDef())
+			{
+				const FLinearColor Value = InputNode->Input.GetValue<FLinearColor>();
+				TSharedPtr<FJsonObject> ColorObject = MakeShared<FJsonObject>();
+				ColorObject->SetNumberField(TEXT("R"), Value.R);
+				ColorObject->SetNumberField(TEXT("G"), Value.G);
+				ColorObject->SetNumberField(TEXT("B"), Value.B);
+				ColorObject->SetNumberField(TEXT("A"), Value.A);
+				InputsObject->SetObjectField(InputName, ColorObject);
+				AddDebugField(InputsObject, TEXT("_DebugDefaultFromCalledGraph"), FullName);
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	bool TrySetDefaultValueFromParameterMapGetNode(UEdGraphNode* GetNode, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject)
+	{
+		if (!GetNode || InputName.IsEmpty() || !InputsObject.IsValid())
+		{
+			return false;
+		}
+
+		TArray<UEdGraphPin*> ValueOutputPins;
+		TArray<UEdGraphPin*> ValueInputPins;
+		for (UEdGraphPin* Pin : GetNode->Pins)
+		{
+			if (!Pin || Pin->bOrphanedPin)
+			{
+				continue;
+			}
+
+			if (Pin->PinType.PinSubCategoryObject == FNiagaraTypeDefinition::GetParameterMapStruct())
+			{
+				continue;
+			}
+
+			if (Pin->Direction == EGPD_Output)
+			{
+				ValueOutputPins.Add(Pin);
+			}
+			else if (Pin->Direction == EGPD_Input)
+			{
+				ValueInputPins.Add(Pin);
+			}
+		}
+
+		int32 OutputIndex = INDEX_NONE;
+		for (int32 Index = 0; Index < ValueOutputPins.Num(); ++Index)
+		{
+			const FString PinName = ValueOutputPins[Index]->PinName.ToString();
+			int32 DotIndex = INDEX_NONE;
+			const FString SimplifiedName = PinName.FindLastChar(TEXT('.'), DotIndex) ? PinName.Mid(DotIndex + 1) : PinName;
+			if (IsSameInputToken(SimplifiedName, InputName) || IsSameInputToken(PinName, InputName))
+			{
+				OutputIndex = Index;
+				break;
+			}
+		}
+
+		if (OutputIndex == INDEX_NONE || !ValueInputPins.IsValidIndex(OutputIndex))
+		{
+			return false;
+		}
+
+		UEdGraphPin* DefaultPin = ValueInputPins[OutputIndex];
+		if (TrySetDefaultValueFromPin(DefaultPin, InputName, InputsObject))
+		{
+			AddDebugField(InputsObject, TEXT("_DebugDefaultFromModule"), TEXT("ParameterMapGetIndexedInput"));
+			AddDebugField(InputsObject, TEXT("_DebugParameterMapGetMatchedPin"), DefaultPin->PinName.ToString());
+			return true;
+		}
+
+		return false;
+	}
+
+	bool TrySetDefaultValueFromModuleScript(UNiagaraScript* ModuleScript, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject)
+	{
+		if (!ModuleScript || !InputsObject.IsValid() || InputName.IsEmpty())
+		{
+			AddDebugField(InputsObject, TEXT("_DebugModuleDefaultStage"), TEXT("InvalidArgs"));
+			return false;
+		}
+
+		UNiagaraScriptSource* ModuleSource = Cast<UNiagaraScriptSource>(ModuleScript->GetLatestSource());
+		if (!ModuleSource || !ModuleSource->NodeGraph)
+		{
+			AddDebugField(InputsObject, TEXT("_DebugModuleDefaultStage"), TEXT("NoModuleSourceOrGraph"));
+			return false;
+		}
+		AddDebugField(InputsObject, TEXT("_DebugModuleDefaultStage"), TEXT("Begin"));
+		AddDebugModuleGraphValuePins(ModuleSource->NodeGraph, InputsObject);
+
+		for (UEdGraphNode* Node : ModuleSource->NodeGraph->Nodes)
+		{
+			if (!Node || Node->GetClass()->GetFName() != TEXT("NiagaraNodeParameterMapSet"))
+			{
+				continue;
+			}
+
+			UEdGraphPin* Pin = FindParameterMapSetInputPin(Node, InputName, FString());
+			if (!Pin)
+			{
+				continue;
+			}
+
+			if (TrySetDefaultValueFromPin(Pin, InputName, InputsObject))
+			{
+				AddDebugField(InputsObject, TEXT("_DebugModuleDefaultStage"), TEXT("ParameterMapSet"));
+				return true;
+			}
+		}
+
+		for (UEdGraphNode* Node : ModuleSource->NodeGraph->Nodes)
+		{
+			if (!Node || Node->GetClass()->GetFName() != TEXT("NiagaraNodeParameterMapGet"))
+			{
+				continue;
+			}
+
+			if (TrySetDefaultValueFromParameterMapGetNode(Node, InputName, InputsObject))
+			{
+				AddDebugField(InputsObject, TEXT("_DebugModuleDefaultStage"), TEXT("ParameterMapGetIndexedInput"));
+				return true;
+			}
+
+			UEdGraphPin* Pin = FindParameterMapGetValuePin(Node, InputName);
+			if (!Pin)
+			{
+				continue;
+			}
+
+			if (TrySetDefaultValueFromPin(Pin, InputName, InputsObject))
+			{
+				AddDebugField(InputsObject, TEXT("_DebugDefaultFromModule"), TEXT("ParameterMapGet"));
+				AddDebugField(InputsObject, TEXT("_DebugModuleDefaultStage"), TEXT("ParameterMapGet"));
+				return true;
+			}
+		}
+
+		TArray<UNiagaraNodeInput*> InputNodes;
+		ModuleSource->NodeGraph->GetNodesOfClass(InputNodes);
+		TArray<TPair<FString, bool>> BoolCandidates;
+		for (UNiagaraNodeInput* InputNode : InputNodes)
+		{
+			if (!InputNode)
+			{
+				continue;
+			}
+
+			const FString FullName = InputNode->Input.GetName().ToString();
+			int32 DotIndex = INDEX_NONE;
+			const FString SimplifiedName = FullName.FindLastChar(TEXT('.'), DotIndex)
+				? FullName.Mid(DotIndex + 1)
+				: FullName;
+			if (!IsSameInputToken(SimplifiedName, InputName)
+				&& !IsSameInputToken(FullName, InputName)
+				&& !NormalizeInputToken(FullName).EndsWith(NormalizeInputToken(InputName)))
+			{
+				continue;
+			}
+
+			const FNiagaraTypeDefinition InputType = InputNode->Input.GetType();
+			bool bBoolValue = false;
+			if (TryReadBoolFromNiagaraVariable(InputNode->Input, bBoolValue))
+			{
+				BoolCandidates.Add(TPair<FString, bool>(FullName, bBoolValue));
+
+				const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Bool"));
+				if (IsSameInputToken(SimplifiedName, InputName)
+					|| IsSameInputToken(FullName, InputName)
+					|| NormalizeInputToken(FullName).EndsWith(NormalizeInputToken(InputName)))
+				{
+					InputsObject->SetBoolField(FieldName, bBoolValue);
+					AddDebugField(InputsObject, TEXT("_DebugDefaultFromModule"), TEXT("NodeInput"));
+					AddDebugField(InputsObject, TEXT("_DebugModuleDefaultStage"), TEXT("NodeInput"));
+					return true;
+				}
+			}
+
+			if (InputType == FNiagaraTypeDefinition::GetColorDef())
+			{
+				const FLinearColor Value = InputNode->Input.GetValue<FLinearColor>();
+				TSharedPtr<FJsonObject> ColorObject = MakeShared<FJsonObject>();
+				ColorObject->SetNumberField(TEXT("R"), Value.R);
+				ColorObject->SetNumberField(TEXT("G"), Value.G);
+				ColorObject->SetNumberField(TEXT("B"), Value.B);
+				ColorObject->SetNumberField(TEXT("A"), Value.A);
+				InputsObject->SetObjectField(InputName, ColorObject);
+				AddDebugField(InputsObject, TEXT("_DebugDefaultFromModule"), TEXT("NodeInput"));
+				AddDebugField(InputsObject, TEXT("_DebugModuleDefaultStage"), TEXT("NodeInput"));
+				return true;
+			}
+		}
+
+		if (BoolCandidates.Num() == 1)
+		{
+			const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Bool"));
+			InputsObject->SetBoolField(FieldName, BoolCandidates[0].Value);
+			AddDebugField(InputsObject, TEXT("_DebugDefaultFromModule"), TEXT("NodeInputSingleBoolFallback"));
+			AddDebugField(InputsObject, TEXT("_DebugModuleDefaultStage"), TEXT("NodeInputSingleBoolFallback"));
+			return true;
+		}
+
+		if (TrySetDefaultValueFromModuleRapidIteration(ModuleScript, InputName, InputsObject))
+		{
+			AddDebugField(InputsObject, TEXT("_DebugModuleDefaultStage"), TEXT("ModuleRapidIteration"));
+			return true;
+		}
+
+		if (TrySetDefaultValueFromGraphMetadata(ModuleSource->NodeGraph, InputName, InputsObject))
+		{
+			AddDebugField(InputsObject, TEXT("_DebugModuleDefaultStage"), TEXT("GraphMetadata"));
+			return true;
+		}
+
+		AddDebugField(InputsObject, TEXT("_DebugModuleDefaultStage"), TEXT("NotFound"));
+		return false;
+	}
+
+	bool TrySetDefaultFromMetadataStruct(const void* StructPtr, const UStruct* StructType, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject, int32 Depth)
+	{
+		if (!StructPtr || !StructType || !InputsObject.IsValid() || Depth > 4)
+		{
+			return false;
+		}
+
+		for (TFieldIterator<FProperty> It(StructType); It; ++It)
+		{
+			const FProperty* Property = *It;
+			if (!Property)
+			{
+				continue;
+			}
+
+			const FString PropName = Property->GetName();
+			const bool bDefaultLike = PropName.Contains(TEXT("Default"), ESearchCase::IgnoreCase) || PropName.Contains(TEXT("Value"), ESearchCase::IgnoreCase);
+
+			if (const FBoolProperty* BoolProp = CastField<FBoolProperty>(Property))
+			{
+				if (!bDefaultLike)
+				{
+					continue;
+				}
+
+				const bool bValue = BoolProp->GetPropertyValue_InContainer(StructPtr);
+				const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Bool"));
+				InputsObject->SetBoolField(FieldName, bValue);
+				return true;
+			}
+
+			if (const FStructProperty* StructProp = CastField<FStructProperty>(Property))
+			{
+				const void* InnerPtr = StructProp->ContainerPtrToValuePtr<void>(StructPtr);
+				if (!InnerPtr)
+				{
+					continue;
+				}
+
+				const UScriptStruct* InnerType = StructProp->Struct;
+				if (!InnerType)
+				{
+					continue;
+				}
+
+				if (InnerType->GetName().Contains(TEXT("NiagaraVariable")) && bDefaultLike)
+				{
+					const FNiagaraVariable* Var = reinterpret_cast<const FNiagaraVariable*>(InnerPtr);
+					if (Var)
+					{
+						bool bBoolValue = false;
+						if (TryReadBoolFromNiagaraVariable(*Var, bBoolValue))
+						{
+							const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Bool"));
+							InputsObject->SetBoolField(FieldName, bBoolValue);
+							return true;
+						}
+
+						if (Var->GetType() == FNiagaraTypeDefinition::GetColorDef())
+						{
+							const FLinearColor Value = Var->GetValue<FLinearColor>();
+							TSharedPtr<FJsonObject> ColorObject = MakeShared<FJsonObject>();
+							ColorObject->SetNumberField(TEXT("R"), Value.R);
+							ColorObject->SetNumberField(TEXT("G"), Value.G);
+							ColorObject->SetNumberField(TEXT("B"), Value.B);
+							ColorObject->SetNumberField(TEXT("A"), Value.A);
+							InputsObject->SetObjectField(InputName, ColorObject);
+							return true;
+						}
+					}
+				}
+
+				if (InnerType == FNiagaraTypeDefinition::GetBoolDef().GetStruct() && bDefaultLike)
+				{
+					const FNiagaraBool* BoolValue = reinterpret_cast<const FNiagaraBool*>(InnerPtr);
+					if (BoolValue)
+					{
+						const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Bool"));
+						InputsObject->SetBoolField(FieldName, BoolValue->GetValue());
+						return true;
+					}
+				}
+
+				if (InnerType == TBaseStructure<FLinearColor>::Get() && bDefaultLike)
+				{
+					const FLinearColor* Value = reinterpret_cast<const FLinearColor*>(InnerPtr);
+					if (Value)
+					{
+						TSharedPtr<FJsonObject> ColorObject = MakeShared<FJsonObject>();
+						ColorObject->SetNumberField(TEXT("R"), Value->R);
+						ColorObject->SetNumberField(TEXT("G"), Value->G);
+						ColorObject->SetNumberField(TEXT("B"), Value->B);
+						ColorObject->SetNumberField(TEXT("A"), Value->A);
+						InputsObject->SetObjectField(InputName, ColorObject);
+						return true;
+					}
+				}
+
+				if (TrySetDefaultFromMetadataStruct(InnerPtr, InnerType, InputName, InputsObject, Depth + 1))
+				{
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	bool TrySetDefaultValueFromGraphMetadata(UNiagaraGraph* Graph, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject)
+	{
+		if (!Graph || InputName.IsEmpty() || !InputsObject.IsValid())
+		{
+			return false;
+		}
+
+		const UStruct* GraphStruct = Graph->GetClass();
+		if (!GraphStruct)
+		{
+			return false;
+		}
+
+		TArray<FString> MetadataKeyHits;
+		TArray<FString> MetadataMapInfo;
+		TArray<FString> MetadataMapSizes;
+		int32 MetadataMapCount = 0;
+		for (TFieldIterator<FProperty> It(GraphStruct); It; ++It)
+		{
+			const FMapProperty* MapProp = CastField<FMapProperty>(*It);
+			if (!MapProp || !MapProp->KeyProp || !MapProp->ValueProp)
+			{
+				continue;
+			}
+
+			const FString PropName = MapProp->GetName();
+			if (!PropName.Contains(TEXT("Meta"), ESearchCase::IgnoreCase))
+			{
+				continue;
+			}
+			++MetadataMapCount;
+
+			const FStructProperty* ValueStructProp = CastField<FStructProperty>(MapProp->ValueProp);
+			const FString KeyTypeName = MapProp->KeyProp ? MapProp->KeyProp->GetClass()->GetName() : TEXT("<null>");
+			const FString ValueTypeName = MapProp->ValueProp ? MapProp->ValueProp->GetClass()->GetName() : TEXT("<null>");
+			MetadataMapInfo.Add(FString::Printf(TEXT("%s Key=%s Value=%s"), *PropName, *KeyTypeName, *ValueTypeName));
+			if (!ValueStructProp)
+			{
+				continue;
+			}
+
+			FScriptMapHelper MapHelper(MapProp, MapProp->ContainerPtrToValuePtr<void>(Graph));
+			MetadataMapSizes.Add(FString::Printf(TEXT("%s Num=%d"), *PropName, MapHelper.Num()));
+			for (int32 Index = 0; Index < MapHelper.GetMaxIndex(); ++Index)
+			{
+				if (!MapHelper.IsValidIndex(Index))
+				{
+					continue;
+				}
+
+				const uint8* KeyPtr = MapHelper.GetKeyPtr(Index);
+				const uint8* ValuePtr = MapHelper.GetValuePtr(Index);
+				if (!KeyPtr || !ValuePtr)
+				{
+					continue;
+				}
+
+				FString VarName;
+				if (!TryExtractVariableLikeName(KeyPtr, MapProp->KeyProp, VarName))
+				{
+					continue;
+				}
+
+				MetadataKeyHits.Add(VarName);
+				int32 DotIndex = INDEX_NONE;
+				const FString LastToken = VarName.FindLastChar(TEXT('.'), DotIndex) ? VarName.Mid(DotIndex + 1) : VarName;
+				if (!IsSameInputToken(VarName, InputName) && !IsSameInputToken(LastToken, InputName))
+				{
+					continue;
+				}
+
+				if (TrySetDefaultFromMetadataStruct(ValuePtr, ValueStructProp->Struct, InputName, InputsObject, 0))
+				{
+					AddDebugField(InputsObject, TEXT("_DebugDefaultFromModule"), TEXT("GraphMetadata"));
+					AddDebugField(InputsObject, TEXT("_DebugMetadataVar"), VarName);
+					return true;
+				}
+			}
+		}
+
+		AddDebugField(InputsObject, TEXT("_DebugGraphMetadataMapCount"), FString::FromInt(MetadataMapCount));
+		AddDebugArrayField(InputsObject, TEXT("_DebugGraphMetadataMapInfo"), MetadataMapInfo);
+		AddDebugArrayField(InputsObject, TEXT("_DebugGraphMetadataMapSizes"), MetadataMapSizes);
+		AddDebugArrayField(InputsObject, TEXT("_DebugGraphMetadataKeys"), MetadataKeyHits);
+		return false;
+	}
+
+	bool TrySetDefaultValueFromModuleRapidIteration(UNiagaraScript* ModuleScript, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject)
+	{
+		if (!ModuleScript || !InputsObject.IsValid() || InputName.IsEmpty())
+		{
+			return false;
+		}
+
+		TArray<FNiagaraVariable> Vars;
+		ModuleScript->RapidIterationParameters.GetParameters(Vars);
+		if (Vars.Num() == 0)
+		{
+			return false;
+		}
+
+		const FString Suffix = TEXT(".") + InputName;
+		const FNiagaraVariable* BestBoolVar = nullptr;
+		int32 BestScore = -1;
+		for (const FNiagaraVariable& Var : Vars)
+		{
+			const FString Name = Var.GetName().ToString();
+			if (!Name.EndsWith(Suffix))
+			{
+				continue;
+			}
+
+			if (Var.GetType() != FNiagaraTypeDefinition::GetBoolDef())
+			{
+				continue;
+			}
+
+			const int32 Score = Name.Len();
+			if (Score > BestScore)
+			{
+				BestScore = Score;
+				BestBoolVar = &Var;
+			}
+		}
+
+		if (!BestBoolVar || ModuleScript->RapidIterationParameters.IndexOf(*BestBoolVar) == INDEX_NONE)
+		{
+			return false;
+		}
+
+		const FNiagaraBool Value = ModuleScript->RapidIterationParameters.GetParameterValue<FNiagaraBool>(*BestBoolVar);
+		const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Bool"));
+		InputsObject->SetBoolField(FieldName, Value.GetValue());
+		AddDebugField(InputsObject, TEXT("_DebugDefaultFromModule"), TEXT("ModuleRapidIteration"));
+		AddDebugField(InputsObject, TEXT("_DebugModuleRapidSet"), BestBoolVar->GetName().ToString());
+		return true;
+	}
+
+	UEdGraphPin* FindParameterMapGetValuePin(UEdGraphNode* GetNode, const FString& InputName)
+	{
+		if (!GetNode || InputName.IsEmpty())
+		{
+			return nullptr;
+		}
+
+		for (UEdGraphPin* Pin : GetNode->Pins)
+		{
+			if (!Pin || Pin->bOrphanedPin)
+			{
+				continue;
+			}
+
+			if (Pin->PinType.PinSubCategoryObject == FNiagaraTypeDefinition::GetParameterMapStruct())
+			{
+				continue;
+			}
+
+			const FString PinName = Pin->PinName.ToString();
+			int32 DotIndex = INDEX_NONE;
+			const FString SimplifiedName = PinName.FindLastChar(TEXT('.'), DotIndex)
+				? PinName.Mid(DotIndex + 1)
+				: PinName;
+			if (SimplifiedName == InputName
+				|| PinName == InputName
+				|| PinName.EndsWith(TEXT(".") + InputName)
+				|| PinName.Contains(InputName, ESearchCase::IgnoreCase)
+				|| IsSameInputToken(SimplifiedName, InputName)
+				|| IsSameInputToken(PinName, InputName))
+			{
+				return Pin;
+			}
+		}
+
+		return nullptr;
+	}
+
+	bool TrySetBoolFromPinNameMatch(UEdGraphNode* Node, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject)
+	{
+		if (!Node || !InputsObject.IsValid() || InputName.IsEmpty())
+		{
+			return false;
+		}
+
+		for (UEdGraphPin* Pin : Node->Pins)
+		{
+			if (!Pin || Pin->Direction != EGPD_Input || Pin->bOrphanedPin)
+			{
+				continue;
+			}
+
+			if (Pin->PinType.PinSubCategoryObject == FNiagaraTypeDefinition::GetParameterMapStruct())
+			{
+				continue;
+			}
+
+			const FString PinName = Pin->PinName.ToString();
+			FString LastToken = PinName;
+			int32 DotIndex = INDEX_NONE;
+			if (PinName.FindLastChar(TEXT('.'), DotIndex))
+			{
+				LastToken = PinName.Mid(DotIndex + 1);
+			}
+
+			if (!PinName.Contains(InputName, ESearchCase::IgnoreCase)
+				&& !IsSameInputToken(PinName, InputName)
+				&& !IsSameInputToken(LastToken, InputName))
+			{
+				continue;
+			}
+
+			if (TrySetBoolFromPin(Pin, InputName, InputsObject))
+			{
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	void GatherDataInterfacesFromObject(const UObject* Owner, TArray<UNiagaraDataInterface*>& OutDataInterfaces)
@@ -1498,6 +2539,197 @@ namespace
 			const FString InputType = InputNode->Input.GetType().GetName();
 			OutEntries.Add(FString::Printf(TEXT("%s : %s"), *InputName, *InputType));
 		}
+	}
+
+	void GatherInputNamesFromFunctionCallPins(UNiagaraNodeFunctionCall* FunctionNode, TSet<FString>& OutInputNames)
+	{
+		if (!FunctionNode)
+		{
+			return;
+		}
+
+		for (UEdGraphPin* Pin : FunctionNode->Pins)
+		{
+			if (!Pin || Pin->Direction != EGPD_Input || Pin->bOrphanedPin)
+			{
+				continue;
+			}
+
+			if (Pin->PinType.PinSubCategoryObject == FNiagaraTypeDefinition::GetParameterMapStruct())
+			{
+				continue;
+			}
+
+			const FString PinName = Pin->PinName.ToString();
+			int32 DotIndex = INDEX_NONE;
+			const FString InputName = PinName.FindLastChar(TEXT('.'), DotIndex)
+				? PinName.Mid(DotIndex + 1)
+				: PinName;
+			OutInputNames.Add(InputName);
+		}
+	}
+
+	void GatherInputNamesFromRapidIteration(const FString& FunctionName, const TArray<FNiagaraVariable>& RapidIterationVariables, TSet<FString>& OutInputNames)
+	{
+		if (FunctionName.IsEmpty())
+		{
+			return;
+		}
+
+		const FString FunctionToken = TEXT(".") + FunctionName + TEXT(".");
+		for (const FNiagaraVariable& Variable : RapidIterationVariables)
+		{
+			const FString VarName = Variable.GetName().ToString();
+			if (!VarName.Contains(FunctionToken, ESearchCase::CaseSensitive, ESearchDir::FromStart))
+			{
+				continue;
+			}
+
+			int32 DotIndex = INDEX_NONE;
+			const FString InputName = VarName.FindLastChar(TEXT('.'), DotIndex)
+				? VarName.Mid(DotIndex + 1)
+				: VarName;
+			if (!InputName.IsEmpty())
+			{
+				OutInputNames.Add(InputName);
+			}
+		}
+	}
+
+	bool TrySetStaticSwitchValue(UNiagaraNodeFunctionCall* FunctionNode, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject)
+	{
+		if (!FunctionNode || !InputsObject.IsValid() || InputName.IsEmpty())
+		{
+			return false;
+		}
+
+		const FString Suffix = TEXT(".") + InputName;
+		const FString FunctionToken = TEXT(".") + FunctionNode->GetFunctionName() + TEXT(".");
+
+		const FArrayProperty* ArrayProp = FindFProperty<FArrayProperty>(FunctionNode->GetClass(), TEXT("PropagatedStaticSwitchParameters"));
+		const FStructProperty* ElemStructProp = ArrayProp ? CastField<FStructProperty>(ArrayProp->Inner) : nullptr;
+		if (!ArrayProp || !ElemStructProp)
+		{
+			return false;
+		}
+
+		FScriptArrayHelper Helper(ArrayProp, ArrayProp->ContainerPtrToValuePtr<void>(FunctionNode));
+		const UStruct* ElemStruct = ElemStructProp->Struct;
+		TArray<FString> SwitchDebug;
+		bool bFoundAnyCandidate = false;
+		FString BestMatchVarName;
+		bool bBestMatchValue = false;
+		int32 BestScore = -1;
+		for (int32 Index = 0; Index < Helper.Num(); ++Index)
+		{
+			const void* ElemPtr = Helper.GetRawPtr(Index);
+			if (!ElemPtr || !ElemStruct)
+			{
+				continue;
+			}
+
+			const FNiagaraVariableBase* VarBase = nullptr;
+			bool bValue = false;
+			bool bHasValue = false;
+
+			for (TFieldIterator<FProperty> It(ElemStruct); It; ++It)
+			{
+				const FProperty* Property = *It;
+				if (!Property)
+				{
+					continue;
+				}
+
+				if (!VarBase)
+				{
+					if (const FStructProperty* StructProp = CastField<FStructProperty>(Property))
+					{
+						const UScriptStruct* StructType = StructProp->Struct;
+						if (StructType && (StructType->GetName().Equals(TEXT("NiagaraVariable")) || StructType->GetName().Equals(TEXT("NiagaraVariableBase"))))
+						{
+							VarBase = StructProp->ContainerPtrToValuePtr<FNiagaraVariableBase>(ElemPtr);
+							continue;
+						}
+					}
+				}
+
+				if (!bHasValue)
+				{
+					if (const FBoolProperty* BoolProp = CastField<FBoolProperty>(Property))
+					{
+						bValue = BoolProp->GetPropertyValue_InContainer(ElemPtr);
+						bHasValue = true;
+						continue;
+					}
+
+					if (const FStructProperty* StructProp = CastField<FStructProperty>(Property))
+					{
+						const UScriptStruct* StructType = StructProp->Struct;
+						if (StructType && StructType->GetName().Equals(TEXT("NiagaraBool")))
+						{
+							const FNiagaraBool* BoolValue = StructProp->ContainerPtrToValuePtr<FNiagaraBool>(ElemPtr);
+							if (BoolValue)
+							{
+								bValue = BoolValue->GetValue();
+								bHasValue = true;
+								continue;
+							}
+						}
+					}
+				}
+			}
+
+			if (!VarBase || !bHasValue)
+			{
+				continue;
+			}
+
+			const FString VarName = VarBase->GetName().ToString();
+			if (VarName.IsEmpty())
+			{
+				continue;
+			}
+
+			SwitchDebug.Add(FString::Printf(TEXT("%s=%s"), *VarName, bValue ? TEXT("true") : TEXT("false")));
+
+			int32 Score = 0;
+			if (VarName.EndsWith(Suffix))
+			{
+				Score += 100;
+			}
+			else if (VarName.Contains(InputName, ESearchCase::IgnoreCase))
+			{
+				Score += 50;
+			}
+			else
+			{
+				continue;
+			}
+
+			if (VarName.Contains(FunctionToken, ESearchCase::CaseSensitive, ESearchDir::FromStart))
+			{
+				Score += 20;
+			}
+
+			if (Score > BestScore)
+			{
+				BestScore = Score;
+				BestMatchVarName = VarName;
+				bBestMatchValue = bValue;
+				bFoundAnyCandidate = true;
+			}
+		}
+
+		if (bFoundAnyCandidate)
+		{
+			const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Bool"));
+			InputsObject->SetBoolField(FieldName, bBestMatchValue);
+			AddDebugField(InputsObject, TEXT("_DebugStaticSwitchSet"), BestMatchVarName);
+			return true;
+		}
+
+		AddDebugArrayField(InputsObject, TEXT("_DebugStaticSwitchVars"), SwitchDebug);
+		return false;
 	}
 
 	struct FCurveChannel
@@ -2503,6 +3735,20 @@ namespace
 
 	bool MatchesInputPinName(const FString& PinName, const FString& InputName, const FString& FunctionName)
 	{
+		const FString NormalizedInput = NormalizeInputToken(InputName);
+		const FString NormalizedPin = NormalizeInputToken(PinName);
+		FString LastToken = PinName;
+		int32 LastDotIndex = INDEX_NONE;
+		if (PinName.FindLastChar(TEXT('.'), LastDotIndex))
+		{
+			LastToken = PinName.Mid(LastDotIndex + 1);
+		}
+		const FString NormalizedLastToken = NormalizeInputToken(LastToken);
+		if (!NormalizedInput.IsEmpty() && (NormalizedPin == NormalizedInput || NormalizedLastToken == NormalizedInput))
+		{
+			return true;
+		}
+
 		if (!InputName.IsEmpty() && PinName == InputName)
 		{
 			return true;
@@ -2570,6 +3816,8 @@ namespace
 			return false;
 		}
 
+		TArray<FString> BoolPinDebug;
+
 		UEdGraphPin* InputPin = FindFunctionInputPin(FunctionNode, InputName);
 		AddDebugField(InputsObject, TEXT("_DebugInputPinFound"), InputPin ? TEXT("1") : TEXT("0"));
 		if (InputPin)
@@ -2635,6 +3883,11 @@ namespace
 				return true;
 			}
 
+			if (TrySetBoolFromPin(InputPin, InputName, InputsObject))
+			{
+				return true;
+			}
+
 			if (UNiagaraDataInterface* DirectDataInterface = Cast<UNiagaraDataInterface>(InputPin->DefaultObject))
 			{
 				if (TSharedPtr<FJsonObject> CurveObject = BuildCurveObjectFromDataInterface(DirectDataInterface))
@@ -2658,6 +3911,11 @@ namespace
 						return true;
 					}
 
+					if (TrySetBoolFromPin(GraphSetPin, InputName, InputsObject))
+					{
+						return true;
+					}
+
 					if (UNiagaraDataInterface* DirectDataInterface = Cast<UNiagaraDataInterface>(GraphSetPin->DefaultObject))
 					{
 						if (TSharedPtr<FJsonObject> CurveObject = BuildCurveObjectFromDataInterface(DirectDataInterface))
@@ -2666,6 +3924,20 @@ namespace
 							InputsObject->SetObjectField(InputName, CurveObject);
 							return true;
 						}
+					}
+				}
+
+				TArray<UEdGraphNode*> GraphSetNodes;
+				for (UEdGraphNode* Node : OwnerGraph->Nodes)
+				{
+					if (!Node || Node->GetClass()->GetFName() != TEXT("NiagaraNodeParameterMapSet"))
+					{
+						continue;
+					}
+
+					if (TrySetBoolFromPinNameMatch(Node, InputName, InputsObject))
+					{
+						return true;
 					}
 				}
 			}
@@ -2695,15 +3967,43 @@ namespace
 					continue;
 				}
 
+				if (Pin->PinType.PinSubCategoryObject == FNiagaraTypeDefinition::GetBoolDef().GetStruct())
+				{
+					BoolPinDebug.Add(Pin->PinName.ToString());
+				}
+			}
+
+			for (UEdGraphPin* Pin : SetNode->Pins)
+			{
+				if (!Pin || Pin->Direction != EGPD_Input || Pin->bOrphanedPin)
+				{
+					continue;
+				}
+
+				if (Pin->PinType.PinSubCategoryObject == FNiagaraTypeDefinition::GetParameterMapStruct())
+				{
+					continue;
+				}
+
 			}
 
 			UEdGraphPin* SetInputPin = FindParameterMapSetInputPin(SetNode, InputName, FunctionName);
 			if (!SetInputPin)
 			{
+				if (TrySetBoolFromPinNameMatch(SetNode, InputName, InputsObject))
+				{
+					return true;
+				}
+
 				continue;
 			}
 
 			if (SetInputPin->LinkedTo.Num() > 0 && TrySetFromLinkedPins(SetInputPin->LinkedTo))
+			{
+				return true;
+			}
+
+			if (TrySetBoolFromPin(SetInputPin, InputName, InputsObject))
 			{
 				return true;
 			}
@@ -2728,6 +4028,11 @@ namespace
 					return true;
 				}
 
+				if (TrySetBoolFromPin(GraphSetPin, InputName, InputsObject))
+				{
+					return true;
+				}
+
 				if (UNiagaraDataInterface* DirectDataInterface = Cast<UNiagaraDataInterface>(GraphSetPin->DefaultObject))
 				{
 					if (TSharedPtr<FJsonObject> CurveObject = BuildCurveObjectFromDataInterface(DirectDataInterface))
@@ -2740,6 +4045,7 @@ namespace
 			}
 		}
 
+		AddDebugArrayField(InputsObject, TEXT("_DebugBoolPins"), BoolPinDebug);
 		return false;
 	}
 
@@ -2847,6 +4153,12 @@ bool AppendModuleSnapshots(UNiagaraScript* TargetModule, UNiagaraScript* SourceS
 			{
 				GatherInputNamesFromFunctionNode(FunctionNode, InputNames);
 			}
+			GatherInputNamesFromFunctionCallPins(FunctionNode, InputNames);
+			{
+				TArray<FString> InputNameList = InputNames.Array();
+				InputNameList.Sort();
+				AddDebugArrayField(InputsObject, TEXT("_DebugInputNames"), InputNameList);
+			}
 
 			TArray<FNiagaraVariable> RapidIterationVariables;
 			SourceScript->RapidIterationParameters.GetParameters(RapidIterationVariables);
@@ -2873,6 +4185,7 @@ bool AppendModuleSnapshots(UNiagaraScript* TargetModule, UNiagaraScript* SourceS
 			TArray<FString> DynamicInputNodeDebug;
 			CollectDynamicInputNodeDebug(FunctionNode, DynamicInputNodeDebug);
 			AddDebugArrayField(InputsObject, TEXT("_DebugDynamicInputNodes"), DynamicInputNodeDebug);
+			GatherInputNamesFromRapidIteration(FunctionName, RapidIterationVariables, InputNames);
 			TArray<UNiagaraDataInterface*> OuterCurveInterfaces;
 			UObject* OuterOwner = nullptr;
 			if (FunctionNode->GetTypedOuter<UNiagaraSystem>())
@@ -2888,17 +4201,63 @@ bool AppendModuleSnapshots(UNiagaraScript* TargetModule, UNiagaraScript* SourceS
 				OuterOwner = ScriptSource;
 			}
 			CollectCurveInterfacesFromOuter(OuterOwner, OuterCurveInterfaces);
+			TArray<FString> UnresolvedInputs;
+			TArray<FString> UnresolvedInputTraces;
 			for (const FString& InputName : InputNames)
 			{
-				if (TrySetDynamicInputCurveValue(FunctionNode, InputName, InputsObject, FunctionName, RapidIterationVariables,
-						SourceScript->RapidIterationParameters, OuterCurveInterfaces, SourceScript->GetPathName()))
+				bool bHandled = false;
+				const bool bCurveHandled = TrySetDynamicInputCurveValue(FunctionNode, InputName, InputsObject, FunctionName, RapidIterationVariables,
+						SourceScript->RapidIterationParameters, OuterCurveInterfaces, SourceScript->GetPathName());
+				if (bCurveHandled)
 				{
+					bHandled = true;
 					continue;
 				}
 
-				TrySetRapidIterationValue(SourceScript, FunctionName, InputName, RapidIterationVariables, InputsObject,
-					FallbackDataInterfaces, FunctionGraphCurveInterfaces, OuterCurveInterfaces);
+				const bool bStaticSwitchHandled = TrySetStaticSwitchValue(FunctionNode, InputName, InputsObject);
+				if (bStaticSwitchHandled)
+				{
+					bHandled = true;
+					continue;
+				}
+
+				const bool bRapidHandled = TrySetRapidIterationValue(SourceScript, FunctionName, InputName, RapidIterationVariables, InputsObject,
+						FallbackDataInterfaces, FunctionGraphCurveInterfaces, OuterCurveInterfaces);
+				if (bRapidHandled)
+				{
+					bHandled = true;
+					continue;
+				}
+
+				const bool bFunctionDefaultHandled = TrySetDefaultValueFromFunctionNode(FunctionNode, InputName, InputsObject);
+				if (bFunctionDefaultHandled)
+				{
+					bHandled = true;
+					continue;
+				}
+
+				const bool bModuleDefaultHandled = TrySetDefaultValueFromModuleScript(TargetModule, InputName, InputsObject);
+				if (bModuleDefaultHandled)
+				{
+					bHandled = true;
+					continue;
+				}
+
+				if (!bHandled)
+				{
+					UnresolvedInputs.Add(InputName);
+					const FString Trace = FString::Printf(TEXT("%s: Curve=%d StaticSwitch=%d Rapid=%d FunctionDefault=%d ModuleDefault=%d"),
+						*InputName,
+						bCurveHandled ? 1 : 0,
+						bStaticSwitchHandled ? 1 : 0,
+						bRapidHandled ? 1 : 0,
+						bFunctionDefaultHandled ? 1 : 0,
+						bModuleDefaultHandled ? 1 : 0);
+					UnresolvedInputTraces.Add(Trace);
+				}
 			}
+			AddDebugArrayField(InputsObject, TEXT("_DebugUnresolvedInputs"), UnresolvedInputs);
+			AddDebugArrayField(InputsObject, TEXT("_DebugUnresolvedInputTraces"), UnresolvedInputTraces);
 
 			if (InputsObject->Values.Num() == 0)
 			{
@@ -3057,3 +4416,138 @@ bool FNiagaraModuleSnapshotProcessor::CreateSnapshot(UNiagaraScript* ModuleScrip
 #pragma optimize( "", on )
 
 #undef LOCTEXT_NAMESPACE
+namespace
+{
+	bool TryExtractVariableLikeName(const void* KeyPtr, const FProperty* KeyProp, FString& OutName)
+	{
+		OutName.Reset();
+		if (!KeyPtr || !KeyProp)
+		{
+			return false;
+		}
+
+		if (const FNameProperty* NameProp = CastField<FNameProperty>(KeyProp))
+		{
+			OutName = NameProp->GetPropertyValue(KeyPtr).ToString();
+			return !OutName.IsEmpty();
+		}
+
+		if (const FStrProperty* StrProp = CastField<FStrProperty>(KeyProp))
+		{
+			OutName = StrProp->GetPropertyValue(KeyPtr);
+			return !OutName.IsEmpty();
+		}
+
+		const FStructProperty* KeyStructProp = CastField<FStructProperty>(KeyProp);
+		if (!KeyStructProp || !KeyStructProp->Struct)
+		{
+			return false;
+		}
+
+		const UStruct* KeyStruct = KeyStructProp->Struct;
+		if (KeyStruct->GetName().Contains(TEXT("NiagaraVariable"), ESearchCase::IgnoreCase))
+		{
+			const FNiagaraVariableBase* VarBase = reinterpret_cast<const FNiagaraVariableBase*>(KeyPtr);
+			if (VarBase)
+			{
+				const FString Name = VarBase->GetName().ToString();
+				if (!Name.IsEmpty())
+				{
+					OutName = Name;
+					return true;
+				}
+			}
+		}
+
+		if (const FNameProperty* NameField = FindFProperty<FNameProperty>(KeyStruct, TEXT("Name")))
+		{
+			OutName = NameField->GetPropertyValue_InContainer(KeyPtr).ToString();
+			return !OutName.IsEmpty();
+		}
+
+		if (const FStrProperty* StrField = FindFProperty<FStrProperty>(KeyStruct, TEXT("Name")))
+		{
+			OutName = StrField->GetPropertyValue_InContainer(KeyPtr);
+			return !OutName.IsEmpty();
+		}
+
+		// Generic fallback: scan any FName/FString field in the key struct.
+		for (TFieldIterator<FProperty> It(KeyStruct); It; ++It)
+		{
+			const FProperty* Field = *It;
+			if (!Field)
+			{
+				continue;
+			}
+
+			if (const FNameProperty* AnyName = CastField<FNameProperty>(Field))
+			{
+				const FString Value = AnyName->GetPropertyValue_InContainer(KeyPtr).ToString();
+				if (!Value.IsEmpty())
+				{
+					OutName = Value;
+					return true;
+				}
+			}
+			else if (const FStrProperty* AnyStr = CastField<FStrProperty>(Field))
+			{
+				const FString Value = AnyStr->GetPropertyValue_InContainer(KeyPtr);
+				if (!Value.IsEmpty())
+				{
+					OutName = Value;
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+}
+namespace
+{
+	void AddDebugModuleGraphValuePins(UNiagaraGraph* Graph, const TSharedPtr<FJsonObject>& InputsObject)
+	{
+		if (!Graph || !InputsObject.IsValid())
+		{
+			return;
+		}
+
+		TArray<FString> PinEntries;
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (!Node)
+			{
+				continue;
+			}
+
+			const FString NodeClass = Node->GetClass()->GetName();
+			if (!NodeClass.Contains(TEXT("ParameterMapGet")) && !NodeClass.Contains(TEXT("ParameterMapSet")))
+			{
+				continue;
+			}
+
+			for (UEdGraphPin* Pin : Node->Pins)
+			{
+				if (!Pin || Pin->bOrphanedPin)
+				{
+					continue;
+				}
+
+				if (Pin->PinType.PinSubCategoryObject == FNiagaraTypeDefinition::GetParameterMapStruct())
+				{
+					continue;
+				}
+
+				const FString Dir = (Pin->Direction == EGPD_Input) ? TEXT("In") : TEXT("Out");
+				const FString TypeName = Pin->PinType.PinSubCategoryObject.IsValid()
+					? Pin->PinType.PinSubCategoryObject->GetName()
+					: Pin->PinType.PinCategory.ToString();
+				const FString Def = GetPinDefaultString(Pin);
+				PinEntries.Add(FString::Printf(TEXT("%s %s %s Type=%s Default=%s"),
+					*NodeClass, *Dir, *Pin->PinName.ToString(), *TypeName, *Def));
+			}
+		}
+
+		AddDebugArrayField(InputsObject, TEXT("_DebugModuleGraphValuePins"), PinEntries);
+	}
+}
