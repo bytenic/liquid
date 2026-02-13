@@ -93,6 +93,7 @@ namespace
 	bool IsSameInputToken(const FString& A, const FString& B);
 	bool TrySetDefaultFromMetadataStruct(const void* StructPtr, const UStruct* StructType, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject, int32 Depth);
 	bool TryExtractVariableLikeName(const void* KeyPtr, const FProperty* KeyProp, FString& OutName);
+	bool TrySetCurveScaleFieldFromDataInterface(const UNiagaraDataInterface* DataInterface, const TSharedPtr<FJsonObject>& CurveObject);
 
 	UEdGraphPin* FindParameterMapInputPin(const UEdGraphNode& Node)
 	{
@@ -208,6 +209,57 @@ namespace
 
 		const FFloatProperty* ScaleProperty = FindFProperty<FFloatProperty>(DataInterface->GetClass(), TEXT("CurveScale"));
 		return ScaleProperty ? ScaleProperty->GetPropertyValue_InContainer(DataInterface) : 1.0f;
+	}
+
+	bool TrySetCurveScaleFieldFromDataInterface(const UNiagaraDataInterface* DataInterface, const TSharedPtr<FJsonObject>& CurveObject)
+	{
+		if (!DataInterface || !CurveObject.IsValid())
+		{
+			return false;
+		}
+
+		if (const FFloatProperty* FloatScale = FindFProperty<FFloatProperty>(DataInterface->GetClass(), TEXT("CurveScale")))
+		{
+			CurveObject->SetNumberField(TEXT("CurveScale"), FloatScale->GetPropertyValue_InContainer(DataInterface));
+			return true;
+		}
+
+		const FStructProperty* StructScale = FindFProperty<FStructProperty>(DataInterface->GetClass(), TEXT("CurveScale"));
+		if (!StructScale || !StructScale->Struct)
+		{
+			return false;
+		}
+
+		const void* ScalePtr = StructScale->ContainerPtrToValuePtr<void>(DataInterface);
+		if (!ScalePtr)
+		{
+			return false;
+		}
+
+		TSharedPtr<FJsonObject> ScaleObject = MakeShared<FJsonObject>();
+		const UStruct* ScaleStruct = StructScale->Struct;
+		for (const TCHAR* ComponentName : {TEXT("X"), TEXT("Y"), TEXT("Z"), TEXT("W"), TEXT("R"), TEXT("G"), TEXT("B"), TEXT("A")})
+		{
+			if (const FFloatProperty* ComponentProp = FindFProperty<FFloatProperty>(ScaleStruct, ComponentName))
+			{
+				ScaleObject->SetNumberField(ComponentName, ComponentProp->GetPropertyValue_InContainer(ScalePtr));
+				continue;
+			}
+
+			if (const FDoubleProperty* ComponentDoubleProp = FindFProperty<FDoubleProperty>(ScaleStruct, ComponentName))
+			{
+				ScaleObject->SetNumberField(ComponentName, ComponentDoubleProp->GetPropertyValue_InContainer(ScalePtr));
+				continue;
+			}
+		}
+
+		if (ScaleObject->Values.Num() == 0)
+		{
+			return false;
+		}
+
+		CurveObject->SetObjectField(TEXT("CurveScale"), ScaleObject);
+		return true;
 	}
 
 	void GatherRapidIterationDataInterfaces(const FNiagaraParameterStore& Store, TArray<UNiagaraDataInterface*>& OutDataInterfaces)
@@ -2967,7 +3019,10 @@ namespace
 		if (const UNiagaraDataInterfaceCurve* FloatCurve = Cast<UNiagaraDataInterfaceCurve>(DataInterface))
 		{
 			TSharedPtr<FJsonObject> CurveObject = MakeShared<FJsonObject>();
-			CurveObject->SetNumberField(TEXT("CurveScale"), ExtractCurveScale(FloatCurve));
+			if (!TrySetCurveScaleFieldFromDataInterface(FloatCurve, CurveObject))
+			{
+				CurveObject->SetNumberField(TEXT("CurveScale"), ExtractCurveScale(FloatCurve));
+			}
 			CurveObject->SetArrayField(TEXT("Keys"), BuildCurveKeysArray(FloatCurve->Curve));
 			return CurveObject;
 		}
@@ -2975,7 +3030,10 @@ namespace
 		if (const UNiagaraDataInterfaceColorCurve* ColorCurve = Cast<UNiagaraDataInterfaceColorCurve>(DataInterface))
 		{
 			TSharedPtr<FJsonObject> CurveObject = MakeShared<FJsonObject>();
-			CurveObject->SetNumberField(TEXT("CurveScale"), ExtractCurveScale(ColorCurve));
+			if (!TrySetCurveScaleFieldFromDataInterface(ColorCurve, CurveObject))
+			{
+				CurveObject->SetNumberField(TEXT("CurveScale"), ExtractCurveScale(ColorCurve));
+			}
 
 			TSharedPtr<FJsonObject> ChannelsObject = MakeShared<FJsonObject>();
 			ChannelsObject->SetArrayField(TEXT("R"), BuildCurveKeysArray(ColorCurve->RedCurve));
@@ -3040,7 +3098,10 @@ namespace
 		};
 
 		TSharedPtr<FJsonObject> CurveObject = MakeShared<FJsonObject>();
-		CurveObject->SetNumberField(TEXT("CurveScale"), ExtractCurveScale(DataInterface));
+		if (!TrySetCurveScaleFieldFromDataInterface(DataInterface, CurveObject))
+		{
+			CurveObject->SetNumberField(TEXT("CurveScale"), ExtractCurveScale(DataInterface));
+		}
 
 		if (Channels.Num() == 1)
 		{
@@ -3470,11 +3531,6 @@ namespace
 
 		for (const FNiagaraVariable& Variable : RapidIterationVariables)
 		{
-			if (Variable.GetType() != FNiagaraTypeDefinition::GetFloatDef())
-			{
-				continue;
-			}
-
 			const FString VarName = Variable.GetName().ToString();
 			if (!VarName.Contains(ScaleToken))
 			{
@@ -3512,9 +3568,67 @@ namespace
 			return false;
 		}
 
-		const float ScaleValue = RapidIterationParameters.GetParameterValue<float>(*BestVariable);
-		CurveObject->SetNumberField(TEXT("CurveScale"), ScaleValue);
-		return true;
+		const FNiagaraTypeDefinition ScaleType = BestVariable->GetType();
+		if (ScaleType == FNiagaraTypeDefinition::GetFloatDef())
+		{
+			// Keep vector/color CurveScale authored on DI; avoid collapsing it to scalar.
+			const TSharedPtr<FJsonObject>* ExistingScaleObj = nullptr;
+			if (CurveObject->TryGetObjectField(TEXT("CurveScale"), ExistingScaleObj) && ExistingScaleObj && ExistingScaleObj->IsValid())
+			{
+				return false;
+			}
+
+			const float ScaleValue = RapidIterationParameters.GetParameterValue<float>(*BestVariable);
+			CurveObject->SetNumberField(TEXT("CurveScale"), ScaleValue);
+			return true;
+		}
+
+		if (ScaleType == FNiagaraTypeDefinition::GetVec2Def())
+		{
+			const FVector2f V = RapidIterationParameters.GetParameterValue<FVector2f>(*BestVariable);
+			TSharedPtr<FJsonObject> ScaleObj = MakeShared<FJsonObject>();
+			ScaleObj->SetNumberField(TEXT("X"), V.X);
+			ScaleObj->SetNumberField(TEXT("Y"), V.Y);
+			CurveObject->SetObjectField(TEXT("CurveScale"), ScaleObj);
+			return true;
+		}
+
+		if (ScaleType == FNiagaraTypeDefinition::GetVec3Def())
+		{
+			const FVector3f V = RapidIterationParameters.GetParameterValue<FVector3f>(*BestVariable);
+			TSharedPtr<FJsonObject> ScaleObj = MakeShared<FJsonObject>();
+			ScaleObj->SetNumberField(TEXT("X"), V.X);
+			ScaleObj->SetNumberField(TEXT("Y"), V.Y);
+			ScaleObj->SetNumberField(TEXT("Z"), V.Z);
+			CurveObject->SetObjectField(TEXT("CurveScale"), ScaleObj);
+			return true;
+		}
+
+		if (ScaleType == FNiagaraTypeDefinition::GetVec4Def())
+		{
+			const FVector4f V = RapidIterationParameters.GetParameterValue<FVector4f>(*BestVariable);
+			TSharedPtr<FJsonObject> ScaleObj = MakeShared<FJsonObject>();
+			ScaleObj->SetNumberField(TEXT("X"), V.X);
+			ScaleObj->SetNumberField(TEXT("Y"), V.Y);
+			ScaleObj->SetNumberField(TEXT("Z"), V.Z);
+			ScaleObj->SetNumberField(TEXT("W"), V.W);
+			CurveObject->SetObjectField(TEXT("CurveScale"), ScaleObj);
+			return true;
+		}
+
+		if (ScaleType == FNiagaraTypeDefinition::GetColorDef())
+		{
+			const FLinearColor C = RapidIterationParameters.GetParameterValue<FLinearColor>(*BestVariable);
+			TSharedPtr<FJsonObject> ScaleObj = MakeShared<FJsonObject>();
+			ScaleObj->SetNumberField(TEXT("R"), C.R);
+			ScaleObj->SetNumberField(TEXT("G"), C.G);
+			ScaleObj->SetNumberField(TEXT("B"), C.B);
+			ScaleObj->SetNumberField(TEXT("A"), C.A);
+			CurveObject->SetObjectField(TEXT("CurveScale"), ScaleObj);
+			return true;
+		}
+
+		return false;
 	}
 
 	bool IsCurveInputName(const FString& InputName)
