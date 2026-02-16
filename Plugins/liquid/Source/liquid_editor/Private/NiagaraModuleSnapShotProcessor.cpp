@@ -3787,6 +3787,34 @@ namespace
 			return false;
 		};
 
+		auto TrySetFromSetInputPin = [&](UEdGraphPin* SetInputPin) -> bool
+		{
+			if (!SetInputPin)
+			{
+				return false;
+			}
+
+			if (SetInputPin->LinkedTo.Num() > 0 && TrySetFromLinkedPins(SetInputPin->LinkedTo))
+			{
+				return true;
+			}
+
+			if (TrySetBoolFromPin(SetInputPin, InputName, InputsObject))
+			{
+				return true;
+			}
+
+			if (UNiagaraDataInterface* DirectDataInterface = Cast<UNiagaraDataInterface>(SetInputPin->DefaultObject))
+			{
+				if (TrySetCurveObjectFieldFromDataInterface(DirectDataInterface, FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, InputsObject))
+				{
+					return true;
+				}
+			}
+
+			return false;
+		};
+
 		if (InputPin)
 		{
 			if (FunctionNode->FunctionScript && FunctionNode->FunctionScript->GetUsage() == ENiagaraScriptUsage::DynamicInput)
@@ -3827,22 +3855,9 @@ namespace
 			{
 				if (UEdGraphPin* GraphSetPin = FindParameterMapSetInputPinInGraph(OwnerGraph, InputName, FunctionName))
 				{
-					if (GraphSetPin->LinkedTo.Num() > 0 && TrySetFromLinkedPins(GraphSetPin->LinkedTo))
+					if (TrySetFromSetInputPin(GraphSetPin))
 					{
 						return true;
-					}
-
-					if (TrySetBoolFromPin(GraphSetPin, InputName, InputsObject))
-					{
-						return true;
-					}
-
-					if (UNiagaraDataInterface* DirectDataInterface = Cast<UNiagaraDataInterface>(GraphSetPin->DefaultObject))
-					{
-						if (TrySetCurveObjectFieldFromDataInterface(DirectDataInterface, FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, InputsObject))
-						{
-							return true;
-						}
 					}
 				}
 
@@ -3885,22 +3900,9 @@ namespace
 				continue;
 			}
 
-			if (SetInputPin->LinkedTo.Num() > 0 && TrySetFromLinkedPins(SetInputPin->LinkedTo))
+			if (TrySetFromSetInputPin(SetInputPin))
 			{
 				return true;
-			}
-
-			if (TrySetBoolFromPin(SetInputPin, InputName, InputsObject))
-			{
-				return true;
-			}
-
-			if (UNiagaraDataInterface* DirectDataInterface = Cast<UNiagaraDataInterface>(SetInputPin->DefaultObject))
-			{
-				if (TrySetCurveObjectFieldFromDataInterface(DirectDataInterface, FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, InputsObject))
-				{
-					return true;
-				}
 			}
 		}
 
@@ -3908,22 +3910,9 @@ namespace
 		{
 			if (UEdGraphPin* GraphSetPin = FindParameterMapSetInputPinInGraph(OwnerGraph, InputName, FunctionName))
 			{
-				if (GraphSetPin->LinkedTo.Num() > 0 && TrySetFromLinkedPins(GraphSetPin->LinkedTo))
+				if (TrySetFromSetInputPin(GraphSetPin))
 				{
 					return true;
-				}
-
-				if (TrySetBoolFromPin(GraphSetPin, InputName, InputsObject))
-				{
-					return true;
-				}
-
-				if (UNiagaraDataInterface* DirectDataInterface = Cast<UNiagaraDataInterface>(GraphSetPin->DefaultObject))
-				{
-					if (TrySetCurveObjectFieldFromDataInterface(DirectDataInterface, FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, InputsObject))
-					{
-						return true;
-					}
 				}
 			}
 		}
