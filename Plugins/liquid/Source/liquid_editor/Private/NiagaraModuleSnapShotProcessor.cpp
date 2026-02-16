@@ -1094,16 +1094,16 @@ namespace
 
 	FString NormalizeInputToken(const FString& In)
 	{
-		FString Out;
-		Out.Reserve(In.Len());
+		FString NormalizedToken;
+		NormalizedToken.Reserve(In.Len());
 		for (TCHAR Ch : In)
 		{
 			if (FChar::IsAlnum(Ch))
 			{
-				Out.AppendChar(FChar::ToLower(Ch));
+				NormalizedToken.AppendChar(FChar::ToLower(Ch));
 			}
 		}
-		return Out;
+		return NormalizedToken;
 	}
 
 	bool IsSameInputToken(const FString& A, const FString& B)
@@ -3355,46 +3355,46 @@ namespace
 
 		if (ScaleType == FNiagaraTypeDefinition::GetVec2Def())
 		{
-			const FVector2f V = RapidIterationParameters.GetParameterValue<FVector2f>(*BestVariable);
-			TSharedPtr<FJsonObject> ScaleObj = MakeShared<FJsonObject>();
-			ScaleObj->SetNumberField(TEXT("X"), V.X);
-			ScaleObj->SetNumberField(TEXT("Y"), V.Y);
-			CurveObject->SetObjectField(TEXT("CurveScale"), ScaleObj);
+			const FVector2f ScaleVector = RapidIterationParameters.GetParameterValue<FVector2f>(*BestVariable);
+			TSharedPtr<FJsonObject> ScaleObject = MakeShared<FJsonObject>();
+			ScaleObject->SetNumberField(TEXT("X"), ScaleVector.X);
+			ScaleObject->SetNumberField(TEXT("Y"), ScaleVector.Y);
+			CurveObject->SetObjectField(TEXT("CurveScale"), ScaleObject);
 			return true;
 		}
 
 		if (ScaleType == FNiagaraTypeDefinition::GetVec3Def())
 		{
-			const FVector3f V = RapidIterationParameters.GetParameterValue<FVector3f>(*BestVariable);
-			TSharedPtr<FJsonObject> ScaleObj = MakeShared<FJsonObject>();
-			ScaleObj->SetNumberField(TEXT("X"), V.X);
-			ScaleObj->SetNumberField(TEXT("Y"), V.Y);
-			ScaleObj->SetNumberField(TEXT("Z"), V.Z);
-			CurveObject->SetObjectField(TEXT("CurveScale"), ScaleObj);
+			const FVector3f ScaleVector = RapidIterationParameters.GetParameterValue<FVector3f>(*BestVariable);
+			TSharedPtr<FJsonObject> ScaleObject = MakeShared<FJsonObject>();
+			ScaleObject->SetNumberField(TEXT("X"), ScaleVector.X);
+			ScaleObject->SetNumberField(TEXT("Y"), ScaleVector.Y);
+			ScaleObject->SetNumberField(TEXT("Z"), ScaleVector.Z);
+			CurveObject->SetObjectField(TEXT("CurveScale"), ScaleObject);
 			return true;
 		}
 
 		if (ScaleType == FNiagaraTypeDefinition::GetVec4Def())
 		{
-			const FVector4f V = RapidIterationParameters.GetParameterValue<FVector4f>(*BestVariable);
-			TSharedPtr<FJsonObject> ScaleObj = MakeShared<FJsonObject>();
-			ScaleObj->SetNumberField(TEXT("X"), V.X);
-			ScaleObj->SetNumberField(TEXT("Y"), V.Y);
-			ScaleObj->SetNumberField(TEXT("Z"), V.Z);
-			ScaleObj->SetNumberField(TEXT("W"), V.W);
-			CurveObject->SetObjectField(TEXT("CurveScale"), ScaleObj);
+			const FVector4f ScaleVector = RapidIterationParameters.GetParameterValue<FVector4f>(*BestVariable);
+			TSharedPtr<FJsonObject> ScaleObject = MakeShared<FJsonObject>();
+			ScaleObject->SetNumberField(TEXT("X"), ScaleVector.X);
+			ScaleObject->SetNumberField(TEXT("Y"), ScaleVector.Y);
+			ScaleObject->SetNumberField(TEXT("Z"), ScaleVector.Z);
+			ScaleObject->SetNumberField(TEXT("W"), ScaleVector.W);
+			CurveObject->SetObjectField(TEXT("CurveScale"), ScaleObject);
 			return true;
 		}
 
 		if (ScaleType == FNiagaraTypeDefinition::GetColorDef())
 		{
-			const FLinearColor C = RapidIterationParameters.GetParameterValue<FLinearColor>(*BestVariable);
-			TSharedPtr<FJsonObject> ScaleObj = MakeShared<FJsonObject>();
-			ScaleObj->SetNumberField(TEXT("R"), C.R);
-			ScaleObj->SetNumberField(TEXT("G"), C.G);
-			ScaleObj->SetNumberField(TEXT("B"), C.B);
-			ScaleObj->SetNumberField(TEXT("A"), C.A);
-			CurveObject->SetObjectField(TEXT("CurveScale"), ScaleObj);
+			const FLinearColor ScaleColor = RapidIterationParameters.GetParameterValue<FLinearColor>(*BestVariable);
+			TSharedPtr<FJsonObject> ScaleObject = MakeShared<FJsonObject>();
+			ScaleObject->SetNumberField(TEXT("R"), ScaleColor.R);
+			ScaleObject->SetNumberField(TEXT("G"), ScaleColor.G);
+			ScaleObject->SetNumberField(TEXT("B"), ScaleColor.B);
+			ScaleObject->SetNumberField(TEXT("A"), ScaleColor.A);
+			CurveObject->SetObjectField(TEXT("CurveScale"), ScaleObject);
 			return true;
 		}
 
@@ -3416,6 +3416,7 @@ namespace
 			return false;
 		}
 
+		// CurveScale は別経路(RapidIteration)のオーバーライド値があるため、JSON化後に反映する。
 		TryOverrideCurveScale(FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, CurveObject);
 		InputsObject->SetObjectField(InputName, CurveObject);
 		return true;
@@ -3599,6 +3600,7 @@ namespace
 		TArray<UEdGraphPin*> PendingPins;
 		PendingPins.Add(OutputMapPin);
 
+		// ParameterMap のリンクを辿って、下流の Set ノードを重複なく収集する。
 		while (PendingPins.Num() > 0)
 		{
 			UEdGraphPin* CurrentPin = PendingPins.Pop(EAllowShrinking::No);
