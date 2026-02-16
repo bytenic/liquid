@@ -4,7 +4,6 @@
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "EdGraph/EdGraphPin.h"
-#include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
@@ -18,13 +17,11 @@
 #include "NiagaraNodeInput.h"
 #include "NiagaraNodeOutput.h"
 #include "NiagaraScript.h"
-#include "NiagaraScriptExecutionParameterStore.h"
 #include "NiagaraScriptSource.h"
 #include "NiagaraSystem.h"
 #include "NiagaraTypes.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
-#include "ViewModels/Stack/NiagaraParameterHandle.h"
 #include "Curves/RichCurve.h"
 #include "UObject/UnrealType.h"
 #include "NiagaraParameterStore.h"
@@ -2517,9 +2514,7 @@ namespace
 
 		FScriptArrayHelper Helper(ArrayProp, ArrayProp->ContainerPtrToValuePtr<void>(FunctionNode));
 		const UStruct* ElemStruct = ElemStructProp->Struct;
-		TArray<FString> SwitchDebug;
 		bool bFoundAnyCandidate = false;
-		FString BestMatchVarName;
 		bool bBestMatchValue = false;
 		int32 BestScore = -1;
 		for (int32 Index = 0; Index < Helper.Num(); ++Index)
@@ -2592,8 +2587,6 @@ namespace
 				continue;
 			}
 
-			SwitchDebug.Add(FString::Printf(TEXT("%s=%s"), *VarName, bValue ? TEXT("true") : TEXT("false")));
-
 			int32 Score = 0;
 			if (VarName.EndsWith(Suffix))
 			{
@@ -2616,7 +2609,6 @@ namespace
 			if (Score > BestScore)
 			{
 				BestScore = Score;
-				BestMatchVarName = VarName;
 				bBestMatchValue = bValue;
 				bFoundAnyCandidate = true;
 			}
@@ -3121,7 +3113,6 @@ namespace
 
 		TArray<UNiagaraDataInterface*> DeepInterfaces;
 		CollectDataInterfacesFromObjectDeep(FunctionNode, DeepInterfaces);
-		TArray<FString> DeepInterfaceNames;
 		for (UNiagaraDataInterface* Interface : DeepInterfaces)
 		{
 			if (!Interface)
@@ -3133,11 +3124,7 @@ namespace
 			{
 				TryOverrideCurveScale(FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, CurveObject);
 				CurveMap.Add(Interface->GetName(), CurveObject);
-				DeepInterfaceNames.Add(FString::Printf(TEXT("%s : %s"), *Interface->GetName(), *Interface->GetClass()->GetName()));
 			}
-		}
-		if (DeepInterfaceNames.Num() == 0)
-		{
 		}
 
 		if (CurveMap.Num() == 0)
@@ -3752,9 +3739,6 @@ namespace
 		TArray<FString> BoolPinDebug;
 
 		UEdGraphPin* InputPin = FindFunctionInputPin(FunctionNode, InputName);
-		if (InputPin)
-		{
-		}
 
 		auto TrySetFromLinkedPins = [&](const TArray<UEdGraphPin*>& LinkedPins)
 		{
@@ -3881,38 +3865,6 @@ namespace
 			if (!SetNode)
 			{
 				continue;
-			}
-
-			for (UEdGraphPin* Pin : SetNode->Pins)
-			{
-				if (!Pin || Pin->Direction != EGPD_Input || Pin->bOrphanedPin)
-				{
-					continue;
-				}
-
-				if (Pin->PinType.PinSubCategoryObject == FNiagaraTypeDefinition::GetParameterMapStruct())
-				{
-					continue;
-				}
-
-				if (Pin->PinType.PinSubCategoryObject == FNiagaraTypeDefinition::GetBoolDef().GetStruct())
-				{
-					BoolPinDebug.Add(Pin->PinName.ToString());
-				}
-			}
-
-			for (UEdGraphPin* Pin : SetNode->Pins)
-			{
-				if (!Pin || Pin->Direction != EGPD_Input || Pin->bOrphanedPin)
-				{
-					continue;
-				}
-
-				if (Pin->PinType.PinSubCategoryObject == FNiagaraTypeDefinition::GetParameterMapStruct())
-				{
-					continue;
-				}
-
 			}
 
 			UEdGraphPin* SetInputPin = FindParameterMapSetInputPin(SetNode, InputName, FunctionName);
@@ -4264,11 +4216,8 @@ bool FNiagaraModuleSnapshotProcessor::CreateSnapshot(UNiagaraScript* ModuleScrip
 
 					// 値解決できない入力に備え、Emitter 側 DataInterface をフォールバックとして収集する。
 					TArray<UNiagaraDataInterface*> FallbackDataInterfaces;
-					if (EmitterData)
-					{
-						const UScriptStruct* EmitterStruct = FVersionedNiagaraEmitterData::StaticStruct();
-						CollectDataInterfacesFromStruct(EmitterData, EmitterStruct, FallbackDataInterfaces, 0);
-					}
+					const UScriptStruct* EmitterStruct = FVersionedNiagaraEmitterData::StaticStruct();
+					CollectDataInterfacesFromStruct(EmitterData, EmitterStruct, FallbackDataInterfaces, 0);
 
 					TArray<TSharedPtr<FJsonValue>> UsageModules;
 					if (AppendModuleSnapshots(ModuleScript, Script, Usage, ScriptUsageToString(Usage), FallbackDataInterfaces, UsageModules))
@@ -4309,7 +4258,6 @@ bool FNiagaraModuleSnapshotProcessor::CreateSnapshot(UNiagaraScript* ModuleScrip
 	OutputString.TrimEndInline();
 
 	OutOutputPath = FPaths::Combine(FPaths::ProjectDir(), TEXT("Saved"), TEXT("NiagaraModuleSnapshotsResult.json"));
-	//IFileManager::Get().MakeDirecfatory(*FPaths::GetPath(OutOutputPath), true);
 
 	const bool bSaved = FFileHelper::SaveStringToFile(OutputString, *OutOutputPath, FFileHelper::EEncodingOptions::ForceUTF8);
 	if (!bSaved)
@@ -4321,7 +4269,7 @@ bool FNiagaraModuleSnapshotProcessor::CreateSnapshot(UNiagaraScript* ModuleScrip
 	return true;
 }
 
-#pragma optimize( "", on )
+
 
 #undef LOCTEXT_NAMESPACE
 namespace
@@ -4412,4 +4360,5 @@ namespace
 	}
 }
 
+#pragma optimize( "", on )
 
