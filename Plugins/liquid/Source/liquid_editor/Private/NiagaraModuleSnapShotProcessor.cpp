@@ -151,6 +151,16 @@ namespace
 	bool TrySetCurveFromSingleCurveList(const TArray<UNiagaraDataInterface*>& Interfaces, const FString& FunctionName, const FString& InputName,
 		const TArray<FNiagaraVariable>& RapidIterationVariables, const FNiagaraParameterStore& RapidIterationParameters,
 		const TSharedPtr<FJsonObject>& InputsObject);
+	/** @brief スナップショット解決時の Outer オーナーを決定する。 */
+	UObject* ResolveSnapshotOuterOwner(UNiagaraNodeFunctionCall* FunctionNode, UObject* FallbackOwner);
+	/** @brief モジュール入力の候補名を集約する。 */
+	void GatherSnapshotInputNames(UNiagaraScript* TargetModule, UNiagaraNodeFunctionCall* FunctionNode, const FString& FunctionName,
+		const TArray<FNiagaraVariable>& RapidIterationVariables, TSet<FString>& OutInputNames);
+	/** @brief 単一入力の値解決チェーンを実行する。 */
+	bool ResolveSnapshotInputValue(UNiagaraNodeFunctionCall* FunctionNode, UNiagaraScript* TargetModule, const UNiagaraScript* SourceScript,
+		const FString& FunctionName, const FString& InputName, const TArray<FNiagaraVariable>& RapidIterationVariables,
+		const TArray<UNiagaraDataInterface*>& FallbackDataInterfaces, const TArray<UNiagaraDataInterface*>& FunctionGraphCurveInterfaces,
+		const TArray<UNiagaraDataInterface*>& OuterCurveInterfaces, const TSharedPtr<FJsonObject>& InputsObject);
 	/** @brief ノードの入力 ParameterMap ピンを取得する。 */
 	UEdGraphPin* FindParameterMapInputPin(const UEdGraphNode& Node);
 	/** @brief モジュールグラフから入力名一覧を収集する。 */
@@ -3977,6 +3987,86 @@ namespace
 		return Enum ? Enum->GetNameStringByValue(static_cast<int64>(Usage)) : TEXT("Unknown");
 	}
 
+	UObject* ResolveSnapshotOuterOwner(UNiagaraNodeFunctionCall* FunctionNode, UObject* FallbackOwner)
+	{
+		if (!FunctionNode)
+		{
+			return FallbackOwner;
+		}
+
+		if (FunctionNode->GetTypedOuter<UNiagaraSystem>())
+		{
+			return FunctionNode->GetTypedOuter<UNiagaraSystem>();
+		}
+
+		if (FunctionNode->GetTypedOuter<UNiagaraEmitter>())
+		{
+			return FunctionNode->GetTypedOuter<UNiagaraEmitter>();
+		}
+
+		return FallbackOwner;
+	}
+
+	void GatherSnapshotInputNames(UNiagaraScript* TargetModule, UNiagaraNodeFunctionCall* FunctionNode, const FString& FunctionName,
+		const TArray<FNiagaraVariable>& RapidIterationVariables, TSet<FString>& OutInputNames)
+	{
+		GatherModuleInputNames(TargetModule, OutInputNames);
+		if (OutInputNames.Num() == 0)
+		{
+			// 直接取得できないモジュール向けに FunctionNode から入力名を補完する。
+			GatherInputNamesFromFunctionNode(FunctionNode, OutInputNames);
+		}
+
+		GatherInputNamesFromFunctionCallPins(FunctionNode, OutInputNames);
+		GatherInputNamesFromRapidIteration(FunctionName, RapidIterationVariables, OutInputNames);
+	}
+
+	bool ResolveSnapshotInputValue(UNiagaraNodeFunctionCall* FunctionNode, UNiagaraScript* TargetModule, const UNiagaraScript* SourceScript,
+		const FString& FunctionName, const FString& InputName, const TArray<FNiagaraVariable>& RapidIterationVariables,
+		const TArray<UNiagaraDataInterface*>& FallbackDataInterfaces, const TArray<UNiagaraDataInterface*>& FunctionGraphCurveInterfaces,
+		const TArray<UNiagaraDataInterface*>& OuterCurveInterfaces, const TSharedPtr<FJsonObject>& InputsObject)
+	{
+		if (!FunctionNode || !TargetModule || !SourceScript || !InputsObject.IsValid())
+		{
+			return false;
+		}
+
+		// 値解決の優先度を固定し、取得元の揺れで出力内容が変わりにくいようにする。
+		const bool bCurveHandled = TrySetDynamicInputCurveValue(FunctionNode, InputName, InputsObject, FunctionName, RapidIterationVariables,
+				SourceScript->RapidIterationParameters, OuterCurveInterfaces, SourceScript->GetPathName());
+		if (bCurveHandled)
+		{
+			return true;
+		}
+
+		const bool bStaticSwitchHandled = TrySetStaticSwitchValue(FunctionNode, InputName, InputsObject);
+		if (bStaticSwitchHandled)
+		{
+			return true;
+		}
+
+		const bool bRapidHandled = TrySetRapidIterationValue(FunctionNode, SourceScript, FunctionName, InputName, RapidIterationVariables, InputsObject,
+				FallbackDataInterfaces, FunctionGraphCurveInterfaces, OuterCurveInterfaces);
+		if (bRapidHandled)
+		{
+			return true;
+		}
+
+		const bool bFunctionDefaultHandled = TrySetDefaultValueFromFunctionNode(FunctionNode, InputName, InputsObject);
+		if (bFunctionDefaultHandled)
+		{
+			return true;
+		}
+
+		const bool bModuleDefaultHandled = TrySetDefaultValueFromModuleScript(TargetModule, InputName, InputsObject);
+		if (bModuleDefaultHandled)
+		{
+			return true;
+		}
+
+		return false;
+	}
+
 	/**
 	 * @brief 単一 ScriptUsage 分のモジュール入力スナップショットを出力配列へ追加する。
 	 *
@@ -4024,74 +4114,27 @@ namespace
 			ModuleObject->SetStringField(TEXT("ScriptUsage"), UsageLabel);
 
 			TSharedPtr<FJsonObject> InputsObject = MakeShared<FJsonObject>();
-			TSet<FString> InputNames;
-			// 出力キーの安定性を保つため、まずモジュール定義側の入力名を採用する。
-			GatherModuleInputNames(TargetModule, InputNames);
-
-			if (InputNames.Num() == 0)
-			{
-				// 直接取得できないモジュール向けに FunctionNode から入力名を補完する。
-				GatherInputNamesFromFunctionNode(FunctionNode, InputNames);
-			}
-			GatherInputNamesFromFunctionCallPins(FunctionNode, InputNames);
-
 			TArray<FNiagaraVariable> RapidIterationVariables;
 			SourceScript->RapidIterationParameters.GetParameters(RapidIterationVariables);
-
 			const FString FunctionName = FunctionNode->GetFunctionName();
+			TSet<FString> InputNames;
+			GatherSnapshotInputNames(TargetModule, FunctionNode, FunctionName, RapidIterationVariables, InputNames);
+
 			TArray<UNiagaraDataInterface*> FunctionGraphCurveInterfaces;
 			CollectCurveDataInterfacesFromFunctionCall(FunctionNode, FunctionGraphCurveInterfaces);
 			if (FunctionGraphCurveInterfaces.Num() == 0 && DynamicInputCurveInterfaces.Num() > 0)
 			{
 				FunctionGraphCurveInterfaces = DynamicInputCurveInterfaces;
 			}
-			GatherInputNamesFromRapidIteration(FunctionName, RapidIterationVariables, InputNames);
+
 			TArray<UNiagaraDataInterface*> OuterCurveInterfaces;
-			UObject* OuterOwner = nullptr;
-			if (FunctionNode->GetTypedOuter<UNiagaraSystem>())
-			{
-				OuterOwner = FunctionNode->GetTypedOuter<UNiagaraSystem>();
-			}
-			else if (FunctionNode->GetTypedOuter<UNiagaraEmitter>())
-			{
-				OuterOwner = FunctionNode->GetTypedOuter<UNiagaraEmitter>();
-			}
-			else
-			{
-				OuterOwner = ScriptSource;
-			}
+			UObject* OuterOwner = ResolveSnapshotOuterOwner(FunctionNode, ScriptSource);
 			CollectCurveInterfacesFromOuter(OuterOwner, OuterCurveInterfaces);
+
 			for (const FString& InputName : InputNames)
 			{
-				// 値解決の優先度を固定し、取得元の揺れで出力内容が変わりにくいようにする。
-				const bool bCurveHandled = TrySetDynamicInputCurveValue(FunctionNode, InputName, InputsObject, FunctionName, RapidIterationVariables,
-						SourceScript->RapidIterationParameters, OuterCurveInterfaces, SourceScript->GetPathName());
-				if (bCurveHandled)
-				{
-					continue;
-				}
-
-				const bool bStaticSwitchHandled = TrySetStaticSwitchValue(FunctionNode, InputName, InputsObject);
-				if (bStaticSwitchHandled)
-				{
-					continue;
-				}
-
-				const bool bRapidHandled = TrySetRapidIterationValue(FunctionNode, SourceScript, FunctionName, InputName, RapidIterationVariables, InputsObject,
-						FallbackDataInterfaces, FunctionGraphCurveInterfaces, OuterCurveInterfaces);
-				if (bRapidHandled)
-				{
-					continue;
-				}
-
-				const bool bFunctionDefaultHandled = TrySetDefaultValueFromFunctionNode(FunctionNode, InputName, InputsObject);
-				if (bFunctionDefaultHandled)
-				{
-					continue;
-				}
-
-				const bool bModuleDefaultHandled = TrySetDefaultValueFromModuleScript(TargetModule, InputName, InputsObject);
-				if (bModuleDefaultHandled)
+				if (ResolveSnapshotInputValue(FunctionNode, TargetModule, SourceScript, FunctionName, InputName, RapidIterationVariables,
+						FallbackDataInterfaces, FunctionGraphCurveInterfaces, OuterCurveInterfaces, InputsObject))
 				{
 					continue;
 				}
