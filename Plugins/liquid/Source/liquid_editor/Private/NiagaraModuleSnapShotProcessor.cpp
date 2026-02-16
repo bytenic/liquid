@@ -148,6 +148,9 @@ namespace
 	FString NormalizeInputToken(const FString& In);
 	/** @brief 入力トークン同士の同値性を判定する。 */
 	bool IsSameInputToken(const FString& A, const FString& B);
+	/** @brief ピン名と入力名の一致判定を共通化する。 */
+	bool DoesPinNameMatchInput(const FString& PinName, const FString& InputName, const FString& FunctionName, bool bAllowGeneralContains,
+		bool bAllowDelimitedContains);
 	/** @brief メタデータ構造体から既定値設定を試行する。 */
 	bool TrySetDefaultFromMetadataStruct(const void* StructPtr, const UStruct* StructType, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject, int32 Depth);
 	/** @brief 変数名に相当するキー名抽出を試行する。 */
@@ -1154,6 +1157,61 @@ namespace
 		return !NA.IsEmpty() && NA == NB;
 	}
 
+	bool DoesPinNameMatchInput(const FString& PinName, const FString& InputName, const FString& FunctionName, bool bAllowGeneralContains,
+		bool bAllowDelimitedContains)
+	{
+		FString LastToken = PinName;
+		int32 LastDotIndex = INDEX_NONE;
+		if (PinName.FindLastChar(TEXT('.'), LastDotIndex))
+		{
+			LastToken = PinName.Mid(LastDotIndex + 1);
+		}
+
+		if (!InputName.IsEmpty())
+		{
+			if (PinName == InputName
+				|| IsSameInputToken(PinName, InputName)
+				|| IsSameInputToken(LastToken, InputName))
+			{
+				return true;
+			}
+
+			const FString Suffix = TEXT(".") + InputName;
+			if (PinName.EndsWith(Suffix))
+			{
+				return true;
+			}
+
+			if (bAllowDelimitedContains && PinName.Contains(TEXT(".") + InputName + TEXT(".")))
+			{
+				return true;
+			}
+
+			if (bAllowGeneralContains && PinName.Contains(InputName, ESearchCase::IgnoreCase))
+			{
+				return true;
+			}
+		}
+
+		if (FunctionName.IsEmpty())
+		{
+			return false;
+		}
+
+		const FString FunctionToken = TEXT(".") + FunctionName + TEXT(".");
+		if (!PinName.Contains(FunctionToken, ESearchCase::CaseSensitive, ESearchDir::FromStart))
+		{
+			return !InputName.IsEmpty() && PinName.EndsWith(TEXT(".") + InputName);
+		}
+
+		if (InputName.IsEmpty())
+		{
+			return true;
+		}
+
+		return PinName.EndsWith(TEXT(".") + InputName);
+	}
+
 	bool IsBoolPinType(const UEdGraphPin* Pin)
 	{
 		if (!Pin)
@@ -2141,16 +2199,7 @@ namespace
 			}
 
 			const FString PinName = Pin->PinName.ToString();
-			int32 DotIndex = INDEX_NONE;
-			const FString SimplifiedName = PinName.FindLastChar(TEXT('.'), DotIndex)
-				? PinName.Mid(DotIndex + 1)
-				: PinName;
-			if (SimplifiedName == InputName
-				|| PinName == InputName
-				|| PinName.EndsWith(TEXT(".") + InputName)
-				|| PinName.Contains(InputName, ESearchCase::IgnoreCase)
-				|| IsSameInputToken(SimplifiedName, InputName)
-				|| IsSameInputToken(PinName, InputName))
+			if (DoesPinNameMatchInput(PinName, InputName, FString(), true, false))
 			{
 				return Pin;
 			}
@@ -2179,16 +2228,7 @@ namespace
 			}
 
 			const FString PinName = Pin->PinName.ToString();
-			FString LastToken = PinName;
-			int32 DotIndex = INDEX_NONE;
-			if (PinName.FindLastChar(TEXT('.'), DotIndex))
-			{
-				LastToken = PinName.Mid(DotIndex + 1);
-			}
-
-			if (!PinName.Contains(InputName, ESearchCase::IgnoreCase)
-				&& !IsSameInputToken(PinName, InputName)
-				&& !IsSameInputToken(LastToken, InputName))
+			if (!DoesPinNameMatchInput(PinName, InputName, FString(), true, false))
 			{
 				continue;
 			}
@@ -3721,48 +3761,7 @@ namespace
 
 	bool MatchesInputPinName(const FString& PinName, const FString& InputName, const FString& FunctionName)
 	{
-		const FString NormalizedInput = NormalizeInputToken(InputName);
-		const FString NormalizedPin = NormalizeInputToken(PinName);
-		FString LastToken = PinName;
-		int32 LastDotIndex = INDEX_NONE;
-		if (PinName.FindLastChar(TEXT('.'), LastDotIndex))
-		{
-			LastToken = PinName.Mid(LastDotIndex + 1);
-		}
-		const FString NormalizedLastToken = NormalizeInputToken(LastToken);
-		if (!NormalizedInput.IsEmpty() && (NormalizedPin == NormalizedInput || NormalizedLastToken == NormalizedInput))
-		{
-			return true;
-		}
-
-		if (!InputName.IsEmpty() && PinName == InputName)
-		{
-			return true;
-		}
-
-		if (!InputName.IsEmpty() && PinName.Contains(TEXT(".") + InputName + TEXT(".")))
-		{
-			return true;
-		}
-
-		if (FunctionName.IsEmpty())
-		{
-			return !InputName.IsEmpty() && PinName.EndsWith(TEXT(".") + InputName);
-		}
-
-		const FString FunctionToken = TEXT(".") + FunctionName + TEXT(".");
-		if (!PinName.Contains(FunctionToken, ESearchCase::CaseSensitive, ESearchDir::FromStart))
-		{
-			return !InputName.IsEmpty() && PinName.EndsWith(TEXT(".") + InputName);
-		}
-
-		if (InputName.IsEmpty())
-		{
-			return true;
-		}
-
-		const FString Suffix = TEXT(".") + InputName;
-		return PinName.EndsWith(Suffix);
+		return DoesPinNameMatchInput(PinName, InputName, FunctionName, false, true);
 	}
 
 	UEdGraphPin* FindParameterMapSetInputPin(UEdGraphNode* SetNode, const FString& InputName, const FString& FunctionName)
