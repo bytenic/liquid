@@ -26,8 +26,6 @@
 #include "UObject/UnrealType.h"
 #include "NiagaraParameterStore.h"
 
-#define LOCTEXT_NAMESPACE "FNiagaraModuleSnapShotProcessor"
-
 #pragma optimize( "", off )
 
 namespace
@@ -449,7 +447,6 @@ namespace
 				const FStructProperty* KeyStructProp = CastField<FStructProperty>(OffsetsProp->KeyProp);
 				if (KeyStructProp)
 				{
-					TArray<FString> OffsetKeys;
 					FScriptMapHelper MapHelper(OffsetsProp, OffsetsProp->ContainerPtrToValuePtr<void>(&Store));
 					const int32 Num = MapHelper.Num();
 					const FString Suffix = TEXT(".") + InputName;
@@ -471,7 +468,6 @@ namespace
 						}
 
 						const FString VarName = VarBase->GetName().ToString();
-						OffsetKeys.Add(VarName);
 						if (VarName.IsEmpty() || !VarName.EndsWith(Suffix) ||
 							!VarName.Contains(FunctionToken, ESearchCase::CaseSensitive, ESearchDir::FromStart))
 						{
@@ -516,8 +512,7 @@ namespace
 			{
 				return false;
 			}
-
-			TArray<FString> DataInterfaceVarNames;
+			
 			for (int32 Index = 0; Index < Num; ++Index)
 			{
 				const void* VarPtr = VarsHelper.GetRawPtr(Index);
@@ -529,10 +524,6 @@ namespace
 
 				const FNiagaraVariable* Var = static_cast<const FNiagaraVariable*>(VarPtr);
 				const FString VarName = Var ? Var->GetName().ToString() : FString();
-				if (!VarName.IsEmpty())
-				{
-					DataInterfaceVarNames.Add(VarName);
-				}
 				const FString Suffix = TEXT(".") + InputName;
 				const FString FunctionToken = TEXT(".") + FunctionName + TEXT(".");
 				if (VarName.IsEmpty() || !VarName.EndsWith(Suffix) || !VarName.Contains(FunctionToken, ESearchCase::CaseSensitive, ESearchDir::FromStart))
@@ -911,16 +902,6 @@ namespace
 
 		if (!MatchedVariable)
 		{
-			TArray<FString> SuffixVars;
-			for (const FNiagaraVariable& Variable : RapidIterationVariables)
-			{
-				const FString VariableName = Variable.GetName().ToString();
-				if (VariableName.EndsWith(Suffix))
-				{
-					SuffixVars.Add(VariableName);
-				}
-			}
-
 			if (TrySetRapidIterationDataInterfaceByName(SourceScript->RapidIterationParameters))
 			{
 				return true;
@@ -1949,9 +1930,7 @@ namespace
 			return false;
 		}
 
-		TArray<FString> MetadataKeyHits;
-		TArray<FString> MetadataMapInfo;
-		TArray<FString> MetadataMapSizes;
+
 		int32 MetadataMapCount = 0;
 		for (TFieldIterator<FProperty> It(GraphStruct); It; ++It)
 		{
@@ -1971,14 +1950,12 @@ namespace
 			const FStructProperty* ValueStructProp = CastField<FStructProperty>(MapProp->ValueProp);
 			const FString KeyTypeName = MapProp->KeyProp ? MapProp->KeyProp->GetClass()->GetName() : TEXT("<null>");
 			const FString ValueTypeName = MapProp->ValueProp ? MapProp->ValueProp->GetClass()->GetName() : TEXT("<null>");
-			MetadataMapInfo.Add(FString::Printf(TEXT("%s Key=%s Value=%s"), *PropName, *KeyTypeName, *ValueTypeName));
 			if (!ValueStructProp)
 			{
 				continue;
 			}
 
 			FScriptMapHelper MapHelper(MapProp, MapProp->ContainerPtrToValuePtr<void>(Graph));
-			MetadataMapSizes.Add(FString::Printf(TEXT("%s Num=%d"), *PropName, MapHelper.Num()));
 			for (int32 Index = 0; Index < MapHelper.GetMaxIndex(); ++Index)
 			{
 				if (!MapHelper.IsValidIndex(Index))
@@ -1998,8 +1975,7 @@ namespace
 				{
 					continue;
 				}
-
-				MetadataKeyHits.Add(VarName);
+				
 				int32 DotIndex = INDEX_NONE;
 				const FString LastToken = VarName.FindLastChar(TEXT('.'), DotIndex) ? VarName.Mid(DotIndex + 1) : VarName;
 				if (!IsSameInputToken(VarName, InputName) && !IsSameInputToken(LastToken, InputName))
@@ -3040,14 +3016,6 @@ namespace
 
 			TArray<UNiagaraDataInterface*> DynamicCurveInterfaces;
 			CollectCurveDataInterfacesFromFunctionCall(FunctionNode, DynamicCurveInterfaces);
-			TArray<FString> DynamicCurveClasses;
-			for (UNiagaraDataInterface* Interface : DynamicCurveInterfaces)
-			{
-				if (Interface)
-				{
-					DynamicCurveClasses.Add(Interface->GetClass()->GetName());
-				}
-			}
 			if (DynamicCurveInterfaces.Num() == 1)
 			{
 				if (TSharedPtr<FJsonObject> CurveObject = BuildCurveObjectFromDataInterface(DynamicCurveInterfaces[0]))
@@ -3735,9 +3703,7 @@ namespace
 		{
 			return false;
 		}
-
-		TArray<FString> BoolPinDebug;
-
+		
 		UEdGraphPin* InputPin = FindFunctionInputPin(FunctionNode, InputName);
 
 		auto TrySetFromLinkedPins = [&](const TArray<UEdGraphPin*>& LinkedPins)
@@ -4269,9 +4235,6 @@ bool FNiagaraModuleSnapshotProcessor::CreateSnapshot(UNiagaraScript* ModuleScrip
 	return true;
 }
 
-
-
-#undef LOCTEXT_NAMESPACE
 namespace
 {
 	bool TryExtractVariableLikeName(const void* KeyPtr, const FProperty* KeyProp, FString& OutName)
@@ -4361,4 +4324,3 @@ namespace
 }
 
 #pragma optimize( "", on )
-
