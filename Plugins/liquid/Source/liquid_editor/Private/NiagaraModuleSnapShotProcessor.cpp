@@ -140,6 +140,17 @@ namespace
 	bool TryExtractVariableLikeName(const void* KeyPtr, const FProperty* KeyProp, FString& OutName);
 	/** @brief DataInterface の CurveScale フィールドを JSON へ反映する。 */
 	bool TrySetCurveScaleFieldFromDataInterface(const UNiagaraDataInterface* DataInterface, const TSharedPtr<FJsonObject>& CurveObject);
+	/** @brief RapidIteration 変数候補から最適な一致を選択する。 */
+	const FNiagaraVariable* FindBestRapidIterationVariable(const TArray<FNiagaraVariable>& RapidIterationVariables, const FString& InputName,
+		const FString& FunctionName, bool bRequireFunctionToken);
+	/** @brief 単一 RapidIteration 変数値を JSON フィールドへ変換する。 */
+	bool TrySetRapidIterationValueFromVariable(UNiagaraNodeFunctionCall* FunctionNode, const FNiagaraVariable& MatchedVariable,
+		const FString& FunctionName, const FString& InputName, const TArray<FNiagaraVariable>& RapidIterationVariables,
+		const FNiagaraParameterStore& RapidIterationParameters, const TSharedPtr<FJsonObject>& InputsObject);
+	/** @brief 単一カーブ候補配列から入力値設定を試行する。 */
+	bool TrySetCurveFromSingleCurveList(const TArray<UNiagaraDataInterface*>& Interfaces, const FString& FunctionName, const FString& InputName,
+		const TArray<FNiagaraVariable>& RapidIterationVariables, const FNiagaraParameterStore& RapidIterationParameters,
+		const TSharedPtr<FJsonObject>& InputsObject);
 	/** @brief ノードの入力 ParameterMap ピンを取得する。 */
 	UEdGraphPin* FindParameterMapInputPin(const UEdGraphNode& Node);
 	/** @brief モジュールグラフから入力名一覧を収集する。 */
@@ -400,16 +411,9 @@ namespace
 		}
 	}
 
-	bool TrySetRapidIterationValue(UNiagaraNodeFunctionCall* FunctionNode, const UNiagaraScript* SourceScript, const FString& FunctionName, const FString& InputName,
-		const TArray<FNiagaraVariable>& RapidIterationVariables, const TSharedPtr<FJsonObject>& InputsObject,
-		const TArray<UNiagaraDataInterface*>& FallbackDataInterfaces, const TArray<UNiagaraDataInterface*>& GraphCurveInterfaces,
-		const TArray<UNiagaraDataInterface*>& OuterCurveInterfaces)
+	const FNiagaraVariable* FindBestRapidIterationVariable(const TArray<FNiagaraVariable>& RapidIterationVariables, const FString& InputName,
+		const FString& FunctionName, bool bRequireFunctionToken)
 	{
-		if (!SourceScript || !InputsObject.IsValid())
-		{
-			return false;
-		}
-
 		const FString Suffix = TEXT(".") + InputName;
 		const FString FunctionToken = TEXT(".") + FunctionName + TEXT(".");
 		const FNiagaraVariable* MatchedVariable = nullptr;
@@ -423,19 +427,161 @@ namespace
 				continue;
 			}
 
-			const int32 FunctionIndex = VariableName.Find(FunctionToken, ESearchCase::CaseSensitive, ESearchDir::FromStart);
-			if (FunctionIndex == INDEX_NONE)
+			const bool bHasFunctionToken = VariableName.Contains(FunctionToken, ESearchCase::CaseSensitive, ESearchDir::FromStart);
+			if (bRequireFunctionToken && !bHasFunctionToken)
 			{
 				continue;
 			}
 
-			const int32 Score = VariableName.Len();
+			int32 Score = VariableName.Len();
+			if (!bRequireFunctionToken && bHasFunctionToken)
+			{
+				Score += 1000;
+			}
+
 			if (Score > BestScore)
 			{
 				BestScore = Score;
 				MatchedVariable = &Variable;
 			}
 		}
+
+		return MatchedVariable;
+	}
+
+	bool TrySetRapidIterationValueFromVariable(UNiagaraNodeFunctionCall* FunctionNode, const FNiagaraVariable& MatchedVariable,
+		const FString& FunctionName, const FString& InputName, const TArray<FNiagaraVariable>& RapidIterationVariables,
+		const FNiagaraParameterStore& RapidIterationParameters, const TSharedPtr<FJsonObject>& InputsObject)
+	{
+		if (!InputsObject.IsValid())
+		{
+			return false;
+		}
+
+		const FNiagaraTypeDefinition& InputType = MatchedVariable.GetType();
+		const UEnum* InputEnum = FindEnumTypeForInput(FunctionNode, InputName);
+		if (InputType == FNiagaraTypeDefinition::GetFloatDef())
+		{
+			const float Value = RapidIterationParameters.GetParameterValue<float>(MatchedVariable);
+			InputsObject->SetNumberField(InputName, Value);
+			return true;
+		}
+
+		if (InputType == FNiagaraTypeDefinition::GetIntDef())
+		{
+			const int32 Value = RapidIterationParameters.GetParameterValue<int32>(MatchedVariable);
+			if (InputEnum)
+			{
+				InputsObject->SetObjectField(InputName, BuildEnumValueObject(InputEnum, Value));
+				return true;
+			}
+			InputsObject->SetNumberField(InputName, Value);
+			return true;
+		}
+
+		if (InputType == FNiagaraTypeDefinition::GetBoolDef())
+		{
+			const FNiagaraBool Value = RapidIterationParameters.GetParameterValue<FNiagaraBool>(MatchedVariable);
+			const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Bool"));
+			InputsObject->SetBoolField(FieldName, Value.GetValue());
+			return true;
+		}
+
+		if (InputType == FNiagaraTypeDefinition::GetVec2Def())
+		{
+			const FVector2f Value = RapidIterationParameters.GetParameterValue<FVector2f>(MatchedVariable);
+			TSharedPtr<FJsonObject> VecObject = MakeShared<FJsonObject>();
+			VecObject->SetNumberField(TEXT("X"), Value.X);
+			VecObject->SetNumberField(TEXT("Y"), Value.Y);
+			InputsObject->SetObjectField(InputName, VecObject);
+			return true;
+		}
+
+		if (InputType == FNiagaraTypeDefinition::GetVec3Def())
+		{
+			const FVector3f Value = RapidIterationParameters.GetParameterValue<FVector3f>(MatchedVariable);
+			TSharedPtr<FJsonObject> VecObject = MakeShared<FJsonObject>();
+			VecObject->SetNumberField(TEXT("X"), Value.X);
+			VecObject->SetNumberField(TEXT("Y"), Value.Y);
+			VecObject->SetNumberField(TEXT("Z"), Value.Z);
+			InputsObject->SetObjectField(InputName, VecObject);
+			return true;
+		}
+
+		if (InputType == FNiagaraTypeDefinition::GetVec4Def())
+		{
+			const FVector4f Value = RapidIterationParameters.GetParameterValue<FVector4f>(MatchedVariable);
+			TSharedPtr<FJsonObject> VecObject = MakeShared<FJsonObject>();
+			VecObject->SetNumberField(TEXT("X"), Value.X);
+			VecObject->SetNumberField(TEXT("Y"), Value.Y);
+			VecObject->SetNumberField(TEXT("Z"), Value.Z);
+			VecObject->SetNumberField(TEXT("W"), Value.W);
+			InputsObject->SetObjectField(InputName, VecObject);
+			return true;
+		}
+
+		if (InputType == FNiagaraTypeDefinition::GetColorDef())
+		{
+			const FLinearColor Value = RapidIterationParameters.GetParameterValue<FLinearColor>(MatchedVariable);
+			TSharedPtr<FJsonObject> ColorObject = MakeShared<FJsonObject>();
+			ColorObject->SetNumberField(TEXT("R"), Value.R);
+			ColorObject->SetNumberField(TEXT("G"), Value.G);
+			ColorObject->SetNumberField(TEXT("B"), Value.B);
+			ColorObject->SetNumberField(TEXT("A"), Value.A);
+			const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Color"));
+			InputsObject->SetObjectField(FieldName, ColorObject);
+			return true;
+		}
+
+		if (InputType.IsDataInterface())
+		{
+			UNiagaraDataInterface* DataInterface = RapidIterationParameters.GetDataInterface(MatchedVariable);
+			if (TrySetCurveObjectFieldFromDataInterface(DataInterface, FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, InputsObject))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	bool TrySetCurveFromSingleCurveList(const TArray<UNiagaraDataInterface*>& Interfaces, const FString& FunctionName, const FString& InputName,
+		const TArray<FNiagaraVariable>& RapidIterationVariables, const FNiagaraParameterStore& RapidIterationParameters,
+		const TSharedPtr<FJsonObject>& InputsObject)
+	{
+		if (!InputsObject.IsValid())
+		{
+			return false;
+		}
+
+		const bool bHintedInput = InputName.Contains(TEXT("Curve"), ESearchCase::IgnoreCase)
+			|| InputName.Contains(TEXT("Scale"), ESearchCase::IgnoreCase);
+		if (!bHintedInput || Interfaces.Num() != 1)
+		{
+			return false;
+		}
+
+		if (TSharedPtr<FJsonObject> CurveObject = BuildCurveObjectFromDataInterface(Interfaces[0]))
+		{
+			TryOverrideCurveScale(FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, CurveObject);
+			InputsObject->SetObjectField(InputName, CurveObject);
+			return true;
+		}
+
+		return false;
+	}
+
+	bool TrySetRapidIterationValue(UNiagaraNodeFunctionCall* FunctionNode, const UNiagaraScript* SourceScript, const FString& FunctionName, const FString& InputName,
+		const TArray<FNiagaraVariable>& RapidIterationVariables, const TSharedPtr<FJsonObject>& InputsObject,
+		const TArray<UNiagaraDataInterface*>& FallbackDataInterfaces, const TArray<UNiagaraDataInterface*>& GraphCurveInterfaces,
+		const TArray<UNiagaraDataInterface*>& OuterCurveInterfaces)
+	{
+		if (!SourceScript || !InputsObject.IsValid())
+		{
+			return false;
+		}
+
+		const FNiagaraVariable* MatchedVariable = FindBestRapidIterationVariable(RapidIterationVariables, InputName, FunctionName, true);
 
 		auto TrySetRapidIterationDataInterfaceByName = [&](const FNiagaraParameterStore& Store) -> bool
 		{
@@ -860,48 +1006,10 @@ namespace
 			return false;
 		};
 
-		auto TrySetFromSingleCurveList = [&](const TArray<UNiagaraDataInterface*>& Interfaces) -> bool
-		{
-			const bool bHintedInput = InputName.Contains(TEXT("Curve"), ESearchCase::IgnoreCase)
-				|| InputName.Contains(TEXT("Scale"), ESearchCase::IgnoreCase);
-			if (!bHintedInput || Interfaces.Num() != 1)
-			{
-				return false;
-			}
-
-			if (TSharedPtr<FJsonObject> CurveObject = BuildCurveObjectFromDataInterface(Interfaces[0]))
-			{
-				TryOverrideCurveScale(FunctionName, InputName, RapidIterationVariables, SourceScript->RapidIterationParameters, CurveObject);
-				InputsObject->SetObjectField(InputName, CurveObject);
-				return true;
-			}
-
-			return false;
-		};
-
 		if (!MatchedVariable)
 		{
 			// Fallback: function-token segment may differ depending on how the stack item was renamed.
-			for (const FNiagaraVariable& Variable : RapidIterationVariables)
-			{
-				const FString VariableName = Variable.GetName().ToString();
-				if (!VariableName.EndsWith(Suffix))
-				{
-					continue;
-				}
-
-				int32 Score = VariableName.Len();
-				if (VariableName.Contains(FunctionToken, ESearchCase::CaseSensitive, ESearchDir::FromStart))
-				{
-					Score += 1000;
-				}
-
-				if (Score > BestScore)
-				{
-					BestScore = Score;
-					MatchedVariable = &Variable;
-				}
-			}
+			MatchedVariable = FindBestRapidIterationVariable(RapidIterationVariables, InputName, FunctionName, false);
 		}
 
 		if (!MatchedVariable)
@@ -921,7 +1029,8 @@ namespace
 				}
 			}
 
-			if (TrySetFromSingleCurveList(GraphCurveInterfaces))
+			if (TrySetCurveFromSingleCurveList(GraphCurveInterfaces, FunctionName, InputName, RapidIterationVariables,
+					SourceScript->RapidIterationParameters, InputsObject))
 			{
 				return true;
 			}
@@ -935,88 +1044,10 @@ namespace
 			return false;
 		}
 
-		const FNiagaraTypeDefinition& InputType = MatchedVariable->GetType();
-		const UEnum* InputEnum = FindEnumTypeForInput(FunctionNode, InputName);
-		if (InputType == FNiagaraTypeDefinition::GetFloatDef())
+		if (TrySetRapidIterationValueFromVariable(FunctionNode, *MatchedVariable, FunctionName, InputName, RapidIterationVariables,
+				RapidIterationParameters, InputsObject))
 		{
-			const float Value = RapidIterationParameters.GetParameterValue<float>(*MatchedVariable);
-			InputsObject->SetNumberField(InputName, Value);
 			return true;
-		}
-
-		if (InputType == FNiagaraTypeDefinition::GetIntDef())
-		{
-			const int32 Value = RapidIterationParameters.GetParameterValue<int32>(*MatchedVariable);
-			if (InputEnum)
-			{
-				InputsObject->SetObjectField(InputName, BuildEnumValueObject(InputEnum, Value));
-				return true;
-			}
-			InputsObject->SetNumberField(InputName, Value);
-			return true;
-		}
-
-		if (InputType == FNiagaraTypeDefinition::GetBoolDef())
-		{
-			const FNiagaraBool Value = RapidIterationParameters.GetParameterValue<FNiagaraBool>(*MatchedVariable);
-			const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Bool"));
-			InputsObject->SetBoolField(FieldName, Value.GetValue());
-			return true;
-		}
-
-		if (InputType == FNiagaraTypeDefinition::GetVec2Def())
-		{
-			const FVector2f Value = RapidIterationParameters.GetParameterValue<FVector2f>(*MatchedVariable);
-			TSharedPtr<FJsonObject> VecObject = MakeShared<FJsonObject>();
-			VecObject->SetNumberField(TEXT("X"), Value.X);
-			VecObject->SetNumberField(TEXT("Y"), Value.Y);
-			InputsObject->SetObjectField(InputName, VecObject);
-			return true;
-		}
-
-		if (InputType == FNiagaraTypeDefinition::GetVec3Def())
-		{
-			const FVector3f Value = RapidIterationParameters.GetParameterValue<FVector3f>(*MatchedVariable);
-			TSharedPtr<FJsonObject> VecObject = MakeShared<FJsonObject>();
-			VecObject->SetNumberField(TEXT("X"), Value.X);
-			VecObject->SetNumberField(TEXT("Y"), Value.Y);
-			VecObject->SetNumberField(TEXT("Z"), Value.Z);
-			InputsObject->SetObjectField(InputName, VecObject);
-			return true;
-		}
-
-		if (InputType == FNiagaraTypeDefinition::GetVec4Def())
-		{
-			const FVector4f Value = RapidIterationParameters.GetParameterValue<FVector4f>(*MatchedVariable);
-			TSharedPtr<FJsonObject> VecObject = MakeShared<FJsonObject>();
-			VecObject->SetNumberField(TEXT("X"), Value.X);
-			VecObject->SetNumberField(TEXT("Y"), Value.Y);
-			VecObject->SetNumberField(TEXT("Z"), Value.Z);
-			VecObject->SetNumberField(TEXT("W"), Value.W);
-			InputsObject->SetObjectField(InputName, VecObject);
-			return true;
-		}
-
-		if (InputType == FNiagaraTypeDefinition::GetColorDef())
-		{
-			const FLinearColor Value = RapidIterationParameters.GetParameterValue<FLinearColor>(*MatchedVariable);
-			TSharedPtr<FJsonObject> ColorObject = MakeShared<FJsonObject>();
-			ColorObject->SetNumberField(TEXT("R"), Value.R);
-			ColorObject->SetNumberField(TEXT("G"), Value.G);
-			ColorObject->SetNumberField(TEXT("B"), Value.B);
-			ColorObject->SetNumberField(TEXT("A"), Value.A);
-			const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Color"));
-			InputsObject->SetObjectField(FieldName, ColorObject);
-			return true;
-		}
-
-		if (InputType.IsDataInterface())
-		{
-			UNiagaraDataInterface* DataInterface = RapidIterationParameters.GetDataInterface(*MatchedVariable);
-			if (TrySetCurveObjectFieldFromDataInterface(DataInterface, FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, InputsObject))
-			{
-				return true;
-			}
 		}
 
 		if (UNiagaraDataInterface* OuterCurve = SelectOuterCurveInterface(OuterCurveInterfaces, SourceScript->GetPathName(), InputName))
@@ -1027,7 +1058,7 @@ namespace
 			}
 		}
 
-		if (TrySetFromSingleCurveList(GraphCurveInterfaces))
+		if (TrySetCurveFromSingleCurveList(GraphCurveInterfaces, FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, InputsObject))
 		{
 			return true;
 		}
