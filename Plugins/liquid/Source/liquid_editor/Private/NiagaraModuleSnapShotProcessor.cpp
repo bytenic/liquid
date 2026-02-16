@@ -3585,7 +3585,7 @@ namespace
 
 		while (PendingPins.Num() > 0)
 		{
-			UEdGraphPin* CurrentPin = PendingPins.Pop(false);
+			UEdGraphPin* CurrentPin = PendingPins.Pop(EAllowShrinking::No);
 			if (!CurrentPin)
 			{
 				continue;
@@ -4138,7 +4138,7 @@ bool FNiagaraModuleSnapshotProcessor::CreateSnapshot(UNiagaraScript* ModuleScrip
 	// 検索範囲を指定パス配下の NiagaraSystem に限定し、結果スコープを安定化させる。
 	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
 	FARFilter Filter;
-	Filter.ClassNames.Add(UNiagaraSystem::StaticClass()->GetFName());
+	Filter.ClassPaths.Add(UNiagaraSystem::StaticClass()->GetClassPathName());
 	Filter.PackagePaths.Add(*NormalizedPath);
 	Filter.bRecursivePaths = true;
 
@@ -4155,7 +4155,7 @@ bool FNiagaraModuleSnapshotProcessor::CreateSnapshot(UNiagaraScript* ModuleScrip
 		}
 
 		TSharedPtr<FJsonObject> SystemObject = MakeShared<FJsonObject>();
-		SystemObject->SetStringField(TEXT("System"), AssetData.ObjectPath.ToString());
+		SystemObject->SetStringField(TEXT("System"), AssetData.GetObjectPathString());
 
 		TArray<TSharedPtr<FJsonValue>> EmitterArray;
 		const TArray<FNiagaraEmitterHandle>& Handles = System->GetEmitterHandles();
