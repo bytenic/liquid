@@ -82,6 +82,10 @@ namespace
 	/** @brief RapidIteration 由来の CurveScale でカーブ JSON を上書きする。 */
 	bool TryOverrideCurveScale(const FString& FunctionName, const FString& InputName, const TArray<FNiagaraVariable>& RapidIterationVariables,
 		const FNiagaraParameterStore& RapidIterationParameters, const TSharedPtr<FJsonObject>& CurveObject);
+	/** @brief DataInterface からカーブ JSON を構築して入力フィールドへ設定する。 */
+	bool TrySetCurveObjectFieldFromDataInterface(UNiagaraDataInterface* DataInterface, const FString& FunctionName, const FString& InputName,
+		const TArray<FNiagaraVariable>& RapidIterationVariables, const FNiagaraParameterStore& RapidIterationParameters,
+		const TSharedPtr<FJsonObject>& InputsObject);
 	/** @brief 入力名がカーブ系入力かを判定する。 */
 	bool IsCurveInputName(const FString& InputName);
 	/** @brief グラフ内 ParameterMapSet から対象入力ピンを検索する。 */
@@ -1009,20 +1013,16 @@ namespace
 		if (InputType.IsDataInterface())
 		{
 			UNiagaraDataInterface* DataInterface = RapidIterationParameters.GetDataInterface(*MatchedVariable);
-			if (TSharedPtr<FJsonObject> CurveObject = BuildCurveObjectFromDataInterface(DataInterface))
+			if (TrySetCurveObjectFieldFromDataInterface(DataInterface, FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, InputsObject))
 			{
-				TryOverrideCurveScale(FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, CurveObject);
-				InputsObject->SetObjectField(InputName, CurveObject);
 				return true;
 			}
 		}
 
 		if (UNiagaraDataInterface* OuterCurve = SelectOuterCurveInterface(OuterCurveInterfaces, SourceScript->GetPathName(), InputName))
 		{
-			if (TSharedPtr<FJsonObject> CurveObject = BuildCurveObjectFromDataInterface(OuterCurve))
+			if (TrySetCurveObjectFieldFromDataInterface(OuterCurve, FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, InputsObject))
 			{
-				TryOverrideCurveScale(FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, CurveObject);
-				InputsObject->SetObjectField(InputName, CurveObject);
 				return true;
 			}
 		}
@@ -3006,10 +3006,8 @@ namespace
 			const FString DynamicInputName = FunctionNode->GetFunctionName();
 			if (UNiagaraDataInterface* OuterCurve = SelectOuterCurveInterfaceForDynamicInput(OuterCurveInterfaces, SourceScriptPath, DynamicInputName, InputName))
 			{
-				if (TSharedPtr<FJsonObject> CurveObject = BuildCurveObjectFromDataInterface(OuterCurve))
+				if (TrySetCurveObjectFieldFromDataInterface(OuterCurve, FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, InputsObject))
 				{
-					TryOverrideCurveScale(FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, CurveObject);
-					InputsObject->SetObjectField(InputName, CurveObject);
 					return true;
 				}
 			}
@@ -3018,10 +3016,8 @@ namespace
 			CollectCurveDataInterfacesFromFunctionCall(FunctionNode, DynamicCurveInterfaces);
 			if (DynamicCurveInterfaces.Num() == 1)
 			{
-				if (TSharedPtr<FJsonObject> CurveObject = BuildCurveObjectFromDataInterface(DynamicCurveInterfaces[0]))
+				if (TrySetCurveObjectFieldFromDataInterface(DynamicCurveInterfaces[0], FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, InputsObject))
 				{
-					TryOverrideCurveScale(FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, CurveObject);
-					InputsObject->SetObjectField(InputName, CurveObject);
 					return true;
 				}
 			}
@@ -3405,6 +3401,26 @@ namespace
 		return false;
 	}
 
+	bool TrySetCurveObjectFieldFromDataInterface(UNiagaraDataInterface* DataInterface, const FString& FunctionName, const FString& InputName,
+		const TArray<FNiagaraVariable>& RapidIterationVariables, const FNiagaraParameterStore& RapidIterationParameters,
+		const TSharedPtr<FJsonObject>& InputsObject)
+	{
+		if (!DataInterface || !InputsObject.IsValid())
+		{
+			return false;
+		}
+
+		TSharedPtr<FJsonObject> CurveObject = BuildCurveObjectFromDataInterface(DataInterface);
+		if (!CurveObject.IsValid())
+		{
+			return false;
+		}
+
+		TryOverrideCurveScale(FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, CurveObject);
+		InputsObject->SetObjectField(InputName, CurveObject);
+		return true;
+	}
+
 	bool IsCurveInputName(const FString& InputName)
 	{
 		return InputName.Contains(TEXT("Curve"), ESearchCase::IgnoreCase)
@@ -3729,10 +3745,8 @@ namespace
 				{
 					continue;
 				}
-				if (TSharedPtr<FJsonObject> CurveObject = BuildCurveObjectFromDataInterface(DataInterface))
+				if (TrySetCurveObjectFieldFromDataInterface(DataInterface, FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, InputsObject))
 				{
-					TryOverrideCurveScale(FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, CurveObject);
-					InputsObject->SetObjectField(InputName, CurveObject);
 					return true;
 				}
 			}
@@ -3747,10 +3761,8 @@ namespace
 				const FString DynamicInputName = FunctionNode->GetFunctionName();
 				if (UNiagaraDataInterface* OuterCurve = SelectOuterCurveInterfaceForDynamicInput(OuterCurveInterfaces, SourceScriptPath, DynamicInputName, InputName))
 				{
-					if (TSharedPtr<FJsonObject> CurveObject = BuildCurveObjectFromDataInterface(OuterCurve))
+					if (TrySetCurveObjectFieldFromDataInterface(OuterCurve, FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, InputsObject))
 					{
-						TryOverrideCurveScale(FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, CurveObject);
-						InputsObject->SetObjectField(InputName, CurveObject);
 						return true;
 					}
 				}
@@ -3768,10 +3780,8 @@ namespace
 
 			if (UNiagaraDataInterface* DirectDataInterface = Cast<UNiagaraDataInterface>(InputPin->DefaultObject))
 			{
-				if (TSharedPtr<FJsonObject> CurveObject = BuildCurveObjectFromDataInterface(DirectDataInterface))
+				if (TrySetCurveObjectFieldFromDataInterface(DirectDataInterface, FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, InputsObject))
 				{
-					TryOverrideCurveScale(FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, CurveObject);
-					InputsObject->SetObjectField(InputName, CurveObject);
 					return true;
 				}
 			}
@@ -3796,10 +3806,8 @@ namespace
 
 					if (UNiagaraDataInterface* DirectDataInterface = Cast<UNiagaraDataInterface>(GraphSetPin->DefaultObject))
 					{
-						if (TSharedPtr<FJsonObject> CurveObject = BuildCurveObjectFromDataInterface(DirectDataInterface))
+						if (TrySetCurveObjectFieldFromDataInterface(DirectDataInterface, FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, InputsObject))
 						{
-							TryOverrideCurveScale(FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, CurveObject);
-							InputsObject->SetObjectField(InputName, CurveObject);
 							return true;
 						}
 					}
@@ -3856,10 +3864,8 @@ namespace
 
 			if (UNiagaraDataInterface* DirectDataInterface = Cast<UNiagaraDataInterface>(SetInputPin->DefaultObject))
 			{
-				if (TSharedPtr<FJsonObject> CurveObject = BuildCurveObjectFromDataInterface(DirectDataInterface))
+				if (TrySetCurveObjectFieldFromDataInterface(DirectDataInterface, FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, InputsObject))
 				{
-					TryOverrideCurveScale(FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, CurveObject);
-					InputsObject->SetObjectField(InputName, CurveObject);
 					return true;
 				}
 			}
@@ -3881,10 +3887,8 @@ namespace
 
 				if (UNiagaraDataInterface* DirectDataInterface = Cast<UNiagaraDataInterface>(GraphSetPin->DefaultObject))
 				{
-					if (TSharedPtr<FJsonObject> CurveObject = BuildCurveObjectFromDataInterface(DirectDataInterface))
+					if (TrySetCurveObjectFieldFromDataInterface(DirectDataInterface, FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, InputsObject))
 					{
-						TryOverrideCurveScale(FunctionName, InputName, RapidIterationVariables, RapidIterationParameters, CurveObject);
-						InputsObject->SetObjectField(InputName, CurveObject);
 						return true;
 					}
 				}
