@@ -124,6 +124,20 @@ namespace
 	int64 ResolveEnumValueFromDefaultString(const UEnum* EnumType, const FString& DefaultValue);
 	/** @brief Enum 値を JSON オブジェクトへ変換する。 */
 	TSharedPtr<FJsonObject> BuildEnumValueObject(const UEnum* EnumType, int64 EnumValue);
+	/** @brief Enum 値を JSON 入力フィールドへ設定する。 */
+	void SetEnumInputField(const TSharedPtr<FJsonObject>& InputsObject, const FString& InputName, const UEnum* EnumType, int64 EnumValue);
+	/** @brief Bool 値を重複回避付きで JSON 入力フィールドへ設定する。 */
+	void SetUniqueBoolInputField(const TSharedPtr<FJsonObject>& InputsObject, const FString& InputName, bool bValue);
+	/** @brief Vec2 値を JSON オブジェクトとして設定する。 */
+	void SetVector2InputField(const TSharedPtr<FJsonObject>& InputsObject, const FString& InputName, float X, float Y);
+	/** @brief Vec3 値を JSON オブジェクトとして設定する。 */
+	void SetVector3InputField(const TSharedPtr<FJsonObject>& InputsObject, const FString& InputName, float X, float Y, float Z);
+	/** @brief Vec4 値を JSON オブジェクトとして設定する。 */
+	void SetVector4InputField(const TSharedPtr<FJsonObject>& InputsObject, const FString& InputName, float X, float Y, float Z, float W);
+	/** @brief Color 値を JSON オブジェクトとして設定する。 */
+	void SetColorInputField(const TSharedPtr<FJsonObject>& InputsObject, const FString& InputName, const FLinearColor& Color);
+	/** @brief Color 値を重複回避付きフィールドへ設定する。 */
+	void SetUniqueColorInputField(const TSharedPtr<FJsonObject>& InputsObject, const FString& InputName, const FString& Suffix, const FLinearColor& Color);
 	/** @brief Enum ピン値を取得して JSON へ設定する。 */
 	bool TrySetEnumFromPin(UEdGraphPin* Pin, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject);
 	/** @brief 入力名に対応する Enum 型を探索する。 */
@@ -482,7 +496,7 @@ namespace
 			const int32 Value = RapidIterationParameters.GetParameterValue<int32>(MatchedVariable);
 			if (InputEnum)
 			{
-				InputsObject->SetObjectField(InputName, BuildEnumValueObject(InputEnum, Value));
+				SetEnumInputField(InputsObject, InputName, InputEnum, Value);
 				return true;
 			}
 			InputsObject->SetNumberField(InputName, Value);
@@ -492,54 +506,35 @@ namespace
 		if (InputType == FNiagaraTypeDefinition::GetBoolDef())
 		{
 			const FNiagaraBool Value = RapidIterationParameters.GetParameterValue<FNiagaraBool>(MatchedVariable);
-			const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Bool"));
-			InputsObject->SetBoolField(FieldName, Value.GetValue());
+			SetUniqueBoolInputField(InputsObject, InputName, Value.GetValue());
 			return true;
 		}
 
 		if (InputType == FNiagaraTypeDefinition::GetVec2Def())
 		{
 			const FVector2f Value = RapidIterationParameters.GetParameterValue<FVector2f>(MatchedVariable);
-			TSharedPtr<FJsonObject> VecObject = MakeShared<FJsonObject>();
-			VecObject->SetNumberField(TEXT("X"), Value.X);
-			VecObject->SetNumberField(TEXT("Y"), Value.Y);
-			InputsObject->SetObjectField(InputName, VecObject);
+			SetVector2InputField(InputsObject, InputName, Value.X, Value.Y);
 			return true;
 		}
 
 		if (InputType == FNiagaraTypeDefinition::GetVec3Def())
 		{
 			const FVector3f Value = RapidIterationParameters.GetParameterValue<FVector3f>(MatchedVariable);
-			TSharedPtr<FJsonObject> VecObject = MakeShared<FJsonObject>();
-			VecObject->SetNumberField(TEXT("X"), Value.X);
-			VecObject->SetNumberField(TEXT("Y"), Value.Y);
-			VecObject->SetNumberField(TEXT("Z"), Value.Z);
-			InputsObject->SetObjectField(InputName, VecObject);
+			SetVector3InputField(InputsObject, InputName, Value.X, Value.Y, Value.Z);
 			return true;
 		}
 
 		if (InputType == FNiagaraTypeDefinition::GetVec4Def())
 		{
 			const FVector4f Value = RapidIterationParameters.GetParameterValue<FVector4f>(MatchedVariable);
-			TSharedPtr<FJsonObject> VecObject = MakeShared<FJsonObject>();
-			VecObject->SetNumberField(TEXT("X"), Value.X);
-			VecObject->SetNumberField(TEXT("Y"), Value.Y);
-			VecObject->SetNumberField(TEXT("Z"), Value.Z);
-			VecObject->SetNumberField(TEXT("W"), Value.W);
-			InputsObject->SetObjectField(InputName, VecObject);
+			SetVector4InputField(InputsObject, InputName, Value.X, Value.Y, Value.Z, Value.W);
 			return true;
 		}
 
 		if (InputType == FNiagaraTypeDefinition::GetColorDef())
 		{
 			const FLinearColor Value = RapidIterationParameters.GetParameterValue<FLinearColor>(MatchedVariable);
-			TSharedPtr<FJsonObject> ColorObject = MakeShared<FJsonObject>();
-			ColorObject->SetNumberField(TEXT("R"), Value.R);
-			ColorObject->SetNumberField(TEXT("G"), Value.G);
-			ColorObject->SetNumberField(TEXT("B"), Value.B);
-			ColorObject->SetNumberField(TEXT("A"), Value.A);
-			const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Color"));
-			InputsObject->SetObjectField(FieldName, ColorObject);
+			SetUniqueColorInputField(InputsObject, InputName, TEXT("Color"), Value);
 			return true;
 		}
 
@@ -1257,6 +1252,95 @@ namespace
 		return EnumObject;
 	}
 
+	void SetEnumInputField(const TSharedPtr<FJsonObject>& InputsObject, const FString& InputName, const UEnum* EnumType, int64 EnumValue)
+	{
+		if (!InputsObject.IsValid() || InputName.IsEmpty())
+		{
+			return;
+		}
+
+		InputsObject->SetObjectField(InputName, BuildEnumValueObject(EnumType, EnumValue));
+	}
+
+	void SetUniqueBoolInputField(const TSharedPtr<FJsonObject>& InputsObject, const FString& InputName, bool bValue)
+	{
+		if (!InputsObject.IsValid() || InputName.IsEmpty())
+		{
+			return;
+		}
+
+		const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Bool"));
+		InputsObject->SetBoolField(FieldName, bValue);
+	}
+
+	void SetVector2InputField(const TSharedPtr<FJsonObject>& InputsObject, const FString& InputName, float X, float Y)
+	{
+		if (!InputsObject.IsValid() || InputName.IsEmpty())
+		{
+			return;
+		}
+
+		TSharedPtr<FJsonObject> VecObject = MakeShared<FJsonObject>();
+		VecObject->SetNumberField(TEXT("X"), X);
+		VecObject->SetNumberField(TEXT("Y"), Y);
+		InputsObject->SetObjectField(InputName, VecObject);
+	}
+
+	void SetVector3InputField(const TSharedPtr<FJsonObject>& InputsObject, const FString& InputName, float X, float Y, float Z)
+	{
+		if (!InputsObject.IsValid() || InputName.IsEmpty())
+		{
+			return;
+		}
+
+		TSharedPtr<FJsonObject> VecObject = MakeShared<FJsonObject>();
+		VecObject->SetNumberField(TEXT("X"), X);
+		VecObject->SetNumberField(TEXT("Y"), Y);
+		VecObject->SetNumberField(TEXT("Z"), Z);
+		InputsObject->SetObjectField(InputName, VecObject);
+	}
+
+	void SetVector4InputField(const TSharedPtr<FJsonObject>& InputsObject, const FString& InputName, float X, float Y, float Z, float W)
+	{
+		if (!InputsObject.IsValid() || InputName.IsEmpty())
+		{
+			return;
+		}
+
+		TSharedPtr<FJsonObject> VecObject = MakeShared<FJsonObject>();
+		VecObject->SetNumberField(TEXT("X"), X);
+		VecObject->SetNumberField(TEXT("Y"), Y);
+		VecObject->SetNumberField(TEXT("Z"), Z);
+		VecObject->SetNumberField(TEXT("W"), W);
+		InputsObject->SetObjectField(InputName, VecObject);
+	}
+
+	void SetColorInputField(const TSharedPtr<FJsonObject>& InputsObject, const FString& InputName, const FLinearColor& Color)
+	{
+		if (!InputsObject.IsValid() || InputName.IsEmpty())
+		{
+			return;
+		}
+
+		TSharedPtr<FJsonObject> ColorObject = MakeShared<FJsonObject>();
+		ColorObject->SetNumberField(TEXT("R"), Color.R);
+		ColorObject->SetNumberField(TEXT("G"), Color.G);
+		ColorObject->SetNumberField(TEXT("B"), Color.B);
+		ColorObject->SetNumberField(TEXT("A"), Color.A);
+		InputsObject->SetObjectField(InputName, ColorObject);
+	}
+
+	void SetUniqueColorInputField(const TSharedPtr<FJsonObject>& InputsObject, const FString& InputName, const FString& Suffix, const FLinearColor& Color)
+	{
+		if (!InputsObject.IsValid() || InputName.IsEmpty())
+		{
+			return;
+		}
+
+		const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, Suffix);
+		SetColorInputField(InputsObject, FieldName, Color);
+	}
+
 	bool TrySetEnumFromPin(UEdGraphPin* Pin, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject)
 	{
 		if (!Pin || !InputsObject.IsValid() || InputName.IsEmpty())
@@ -1282,7 +1366,7 @@ namespace
 			return false;
 		}
 
-		InputsObject->SetObjectField(InputName, BuildEnumValueObject(EnumType, EnumValue));
+		SetEnumInputField(InputsObject, InputName, EnumType, EnumValue);
 		return true;
 	}
 
@@ -1439,8 +1523,7 @@ namespace
 			return false;
 		}
 
-		const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Bool"));
-		InputsObject->SetBoolField(FieldName, bValue);
+		SetUniqueBoolInputField(InputsObject, InputName, bValue);
 		return true;
 	}
 
@@ -1521,10 +1604,7 @@ namespace
 			FVector2D Vec;
 			if (Vec.InitFromString(DefaultValue))
 			{
-				TSharedPtr<FJsonObject> VecObject = MakeShared<FJsonObject>();
-				VecObject->SetNumberField(TEXT("X"), Vec.X);
-				VecObject->SetNumberField(TEXT("Y"), Vec.Y);
-				InputsObject->SetObjectField(InputName, VecObject);
+				SetVector2InputField(InputsObject, InputName, static_cast<float>(Vec.X), static_cast<float>(Vec.Y));
 				return true;
 			}
 		}
@@ -1533,11 +1613,7 @@ namespace
 			FVector Vec;
 			if (Vec.InitFromString(DefaultValue))
 			{
-				TSharedPtr<FJsonObject> VecObject = MakeShared<FJsonObject>();
-				VecObject->SetNumberField(TEXT("X"), Vec.X);
-				VecObject->SetNumberField(TEXT("Y"), Vec.Y);
-				VecObject->SetNumberField(TEXT("Z"), Vec.Z);
-				InputsObject->SetObjectField(InputName, VecObject);
+				SetVector3InputField(InputsObject, InputName, static_cast<float>(Vec.X), static_cast<float>(Vec.Y), static_cast<float>(Vec.Z));
 				return true;
 			}
 		}
@@ -1546,12 +1622,7 @@ namespace
 			FVector4 Vec;
 			if (Vec.InitFromString(DefaultValue))
 			{
-				TSharedPtr<FJsonObject> VecObject = MakeShared<FJsonObject>();
-				VecObject->SetNumberField(TEXT("X"), Vec.X);
-				VecObject->SetNumberField(TEXT("Y"), Vec.Y);
-				VecObject->SetNumberField(TEXT("Z"), Vec.Z);
-				VecObject->SetNumberField(TEXT("W"), Vec.W);
-				InputsObject->SetObjectField(InputName, VecObject);
+				SetVector4InputField(InputsObject, InputName, static_cast<float>(Vec.X), static_cast<float>(Vec.Y), static_cast<float>(Vec.Z), static_cast<float>(Vec.W));
 				return true;
 			}
 		}
@@ -1560,12 +1631,7 @@ namespace
 			FLinearColor Color;
 			if (Color.InitFromString(DefaultValue))
 			{
-				TSharedPtr<FJsonObject> ColorObject = MakeShared<FJsonObject>();
-				ColorObject->SetNumberField(TEXT("R"), Color.R);
-				ColorObject->SetNumberField(TEXT("G"), Color.G);
-				ColorObject->SetNumberField(TEXT("B"), Color.B);
-				ColorObject->SetNumberField(TEXT("A"), Color.A);
-				InputsObject->SetObjectField(InputName, ColorObject);
+				SetColorInputField(InputsObject, InputName, Color);
 				return true;
 			}
 		}
@@ -1645,20 +1711,14 @@ namespace
 			bool bBoolValue = false;
 			if (TryReadBoolFromNiagaraVariable(InputNode->Input, bBoolValue))
 			{
-				const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Bool"));
-				InputsObject->SetBoolField(FieldName, bBoolValue);
+				SetUniqueBoolInputField(InputsObject, InputName, bBoolValue);
 				return true;
 			}
 
 			if (InputType == FNiagaraTypeDefinition::GetColorDef())
 			{
 				const FLinearColor Value = InputNode->Input.GetValue<FLinearColor>();
-				TSharedPtr<FJsonObject> ColorObject = MakeShared<FJsonObject>();
-				ColorObject->SetNumberField(TEXT("R"), Value.R);
-				ColorObject->SetNumberField(TEXT("G"), Value.G);
-				ColorObject->SetNumberField(TEXT("B"), Value.B);
-				ColorObject->SetNumberField(TEXT("A"), Value.A);
-				InputsObject->SetObjectField(InputName, ColorObject);
+				SetColorInputField(InputsObject, InputName, Value);
 				return true;
 			}
 		}
@@ -1808,12 +1868,11 @@ namespace
 			{
 				BoolCandidates.Add(TPair<FString, bool>(FullName, bBoolValue));
 
-				const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Bool"));
 				if (IsSameInputToken(SimplifiedName, InputName)
 					|| IsSameInputToken(FullName, InputName)
 					|| NormalizeInputToken(FullName).EndsWith(NormalizeInputToken(InputName)))
 				{
-					InputsObject->SetBoolField(FieldName, bBoolValue);
+					SetUniqueBoolInputField(InputsObject, InputName, bBoolValue);
 					return true;
 				}
 			}
@@ -1821,20 +1880,14 @@ namespace
 			if (InputType == FNiagaraTypeDefinition::GetColorDef())
 			{
 				const FLinearColor Value = InputNode->Input.GetValue<FLinearColor>();
-				TSharedPtr<FJsonObject> ColorObject = MakeShared<FJsonObject>();
-				ColorObject->SetNumberField(TEXT("R"), Value.R);
-				ColorObject->SetNumberField(TEXT("G"), Value.G);
-				ColorObject->SetNumberField(TEXT("B"), Value.B);
-				ColorObject->SetNumberField(TEXT("A"), Value.A);
-				InputsObject->SetObjectField(InputName, ColorObject);
+				SetColorInputField(InputsObject, InputName, Value);
 				return true;
 			}
 		}
 
 		if (BoolCandidates.Num() == 1)
 		{
-			const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Bool"));
-			InputsObject->SetBoolField(FieldName, BoolCandidates[0].Value);
+			SetUniqueBoolInputField(InputsObject, InputName, BoolCandidates[0].Value);
 			return true;
 		}
 
@@ -1876,8 +1929,7 @@ namespace
 				}
 
 				const bool bValue = BoolProp->GetPropertyValue_InContainer(StructPtr);
-				const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Bool"));
-				InputsObject->SetBoolField(FieldName, bValue);
+				SetUniqueBoolInputField(InputsObject, InputName, bValue);
 				return true;
 			}
 
@@ -1903,20 +1955,14 @@ namespace
 						bool bBoolValue = false;
 						if (TryReadBoolFromNiagaraVariable(*Var, bBoolValue))
 						{
-							const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Bool"));
-							InputsObject->SetBoolField(FieldName, bBoolValue);
+							SetUniqueBoolInputField(InputsObject, InputName, bBoolValue);
 							return true;
 						}
 
 						if (Var->GetType() == FNiagaraTypeDefinition::GetColorDef())
 						{
 							const FLinearColor Value = Var->GetValue<FLinearColor>();
-							TSharedPtr<FJsonObject> ColorObject = MakeShared<FJsonObject>();
-							ColorObject->SetNumberField(TEXT("R"), Value.R);
-							ColorObject->SetNumberField(TEXT("G"), Value.G);
-							ColorObject->SetNumberField(TEXT("B"), Value.B);
-							ColorObject->SetNumberField(TEXT("A"), Value.A);
-							InputsObject->SetObjectField(InputName, ColorObject);
+							SetColorInputField(InputsObject, InputName, Value);
 							return true;
 						}
 					}
@@ -1927,8 +1973,7 @@ namespace
 					const FNiagaraBool* BoolValue = reinterpret_cast<const FNiagaraBool*>(InnerPtr);
 					if (BoolValue)
 					{
-						const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Bool"));
-						InputsObject->SetBoolField(FieldName, BoolValue->GetValue());
+						SetUniqueBoolInputField(InputsObject, InputName, BoolValue->GetValue());
 						return true;
 					}
 				}
@@ -1938,12 +1983,7 @@ namespace
 					const FLinearColor* Value = reinterpret_cast<const FLinearColor*>(InnerPtr);
 					if (Value)
 					{
-						TSharedPtr<FJsonObject> ColorObject = MakeShared<FJsonObject>();
-						ColorObject->SetNumberField(TEXT("R"), Value->R);
-						ColorObject->SetNumberField(TEXT("G"), Value->G);
-						ColorObject->SetNumberField(TEXT("B"), Value->B);
-						ColorObject->SetNumberField(TEXT("A"), Value->A);
-						InputsObject->SetObjectField(InputName, ColorObject);
+						SetColorInputField(InputsObject, InputName, *Value);
 						return true;
 					}
 				}
@@ -2077,8 +2117,7 @@ namespace
 		}
 
 		const FNiagaraBool Value = ModuleScript->RapidIterationParameters.GetParameterValue<FNiagaraBool>(*BestBoolVar);
-		const FString FieldName = GetUniqueInputFieldName(InputsObject, InputName, TEXT("Bool"));
-		InputsObject->SetBoolField(FieldName, Value.GetValue());
+		SetUniqueBoolInputField(InputsObject, InputName, Value.GetValue());
 		return true;
 	}
 
