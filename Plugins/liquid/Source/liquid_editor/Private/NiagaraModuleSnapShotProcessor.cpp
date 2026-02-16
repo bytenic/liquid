@@ -4215,6 +4215,7 @@ bool FNiagaraModuleSnapshotProcessor::CreateSnapshot(UNiagaraScript* ModuleScrip
 	}
 
 	TSharedPtr<FJsonObject> RootObject = MakeShared<FJsonObject>();
+	RootObject->SetNumberField(TEXT("MatchedNiagaraSystemCount"), SystemArray.Num());
 	RootObject->SetStringField(TEXT("ModuleScript"), ModuleScript->GetPathName());
 	RootObject->SetArrayField(TEXT("Systems"), SystemArray);
 
