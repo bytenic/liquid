@@ -1,4 +1,4 @@
-#include "NiagaraModuleSnapShotProcessor.h"
+﻿#include "NiagaraModuleSnapShotProcessor.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Dom/JsonObject.h"
@@ -80,6 +80,11 @@ namespace
 	FString GetPinDefaultString(UEdGraphPin* Pin);
 	bool TrySetDefaultValueFromCalledGraphInputs(UNiagaraNodeFunctionCall* FunctionNode, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject);
 	bool IsBoolPinType(const UEdGraphPin* Pin);
+	const UEnum* GetEnumTypeFromPin(const UEdGraphPin* Pin);
+	int64 ResolveEnumValueFromDefaultString(const UEnum* EnumType, const FString& DefaultValue);
+	TSharedPtr<FJsonObject> BuildEnumValueObject(const UEnum* EnumType, int64 EnumValue);
+	bool TrySetEnumFromPin(UEdGraphPin* Pin, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject);
+	const UEnum* FindEnumTypeForInput(UNiagaraNodeFunctionCall* FunctionNode, const FString& InputName);
 	bool TryReadBoolFromNiagaraVariable(const FNiagaraVariable& Variable, bool& OutValue);
 	FString NormalizeInputToken(const FString& In);
 	bool IsSameInputToken(const FString& A, const FString& B);
@@ -339,7 +344,7 @@ namespace
 		}
 	}
 
-	bool TrySetRapidIterationValue(const UNiagaraScript* SourceScript, const FString& FunctionName, const FString& InputName,
+	bool TrySetRapidIterationValue(UNiagaraNodeFunctionCall* FunctionNode, const UNiagaraScript* SourceScript, const FString& FunctionName, const FString& InputName,
 		const TArray<FNiagaraVariable>& RapidIterationVariables, const TSharedPtr<FJsonObject>& InputsObject,
 		const TArray<UNiagaraDataInterface*>& FallbackDataInterfaces, const TArray<UNiagaraDataInterface*>& GraphCurveInterfaces,
 		const TArray<UNiagaraDataInterface*>& OuterCurveInterfaces)
@@ -892,6 +897,7 @@ namespace
 		}
 
 		const FNiagaraTypeDefinition& InputType = MatchedVariable->GetType();
+		const UEnum* InputEnum = FindEnumTypeForInput(FunctionNode, InputName);
 		if (InputType == FNiagaraTypeDefinition::GetFloatDef())
 		{
 			const float Value = RapidIterationParameters.GetParameterValue<float>(*MatchedVariable);
@@ -902,6 +908,11 @@ namespace
 		if (InputType == FNiagaraTypeDefinition::GetIntDef())
 		{
 			const int32 Value = RapidIterationParameters.GetParameterValue<int32>(*MatchedVariable);
+			if (InputEnum)
+			{
+				InputsObject->SetObjectField(InputName, BuildEnumValueObject(InputEnum, Value));
+				return true;
+			}
 			InputsObject->SetNumberField(InputName, Value);
 			return true;
 		}
@@ -1090,6 +1101,130 @@ namespace
 			|| PinCategory.Equals(TEXT("boolean"), ESearchCase::IgnoreCase);
 	}
 
+	const UEnum* GetEnumTypeFromPin(const UEdGraphPin* Pin)
+	{
+		if (!Pin)
+		{
+			return nullptr;
+		}
+
+		return Cast<UEnum>(Pin->PinType.PinSubCategoryObject.Get());
+	}
+
+	int64 ResolveEnumValueFromDefaultString(const UEnum* EnumType, const FString& DefaultValue)
+	{
+		if (!EnumType)
+		{
+			return INDEX_NONE;
+		}
+
+		FString Token = DefaultValue.TrimStartAndEnd();
+		Token.ReplaceInline(TEXT("\""), TEXT(""));
+		Token.ReplaceInline(TEXT("'"), TEXT(""));
+		if (Token.IsEmpty())
+		{
+			return INDEX_NONE;
+		}
+
+		int64 NumericValue = INDEX_NONE;
+		if (LexTryParseString(NumericValue, *Token))
+		{
+			return NumericValue;
+		}
+
+		int32 ScopeIndex = INDEX_NONE;
+		if (Token.FindLastChar(TEXT(':'), ScopeIndex) && ScopeIndex + 1 < Token.Len())
+		{
+			Token = Token.Mid(ScopeIndex + 1);
+			Token = Token.TrimStartAndEnd();
+		}
+
+		const int32 EnumCount = EnumType->NumEnums();
+		for (int32 Index = 0; Index < EnumCount; ++Index)
+		{
+			const FString Name = EnumType->GetNameStringByIndex(Index);
+			if (Name.Equals(Token, ESearchCase::IgnoreCase))
+			{
+				return EnumType->GetValueByIndex(Index);
+			}
+
+			const FString FullName = EnumType->GetNameByIndex(Index).ToString();
+			if (FullName.Equals(Token, ESearchCase::IgnoreCase))
+			{
+				return EnumType->GetValueByIndex(Index);
+			}
+		}
+
+		return INDEX_NONE;
+	}
+
+	TSharedPtr<FJsonObject> BuildEnumValueObject(const UEnum* EnumType, int64 EnumValue)
+	{
+		TSharedPtr<FJsonObject> EnumObject = MakeShared<FJsonObject>();
+		EnumObject->SetStringField(TEXT("EnumAssetPath"), EnumType ? EnumType->GetPathName() : FString());
+		EnumObject->SetNumberField(TEXT("Value"), static_cast<double>(EnumValue));
+		const FString EnumName = EnumType ? EnumType->GetNameStringByValue(EnumValue) : FString();
+		EnumObject->SetStringField(TEXT("Name"), EnumName);
+
+		FString DisplayName = EnumName;
+#if WITH_EDITOR
+		if (EnumType)
+		{
+			const FText DisplayNameText = EnumType->GetDisplayNameTextByValue(EnumValue);
+			if (!DisplayNameText.IsEmptyOrWhitespace())
+			{
+				DisplayName = DisplayNameText.ToString();
+			}
+		}
+#endif
+		EnumObject->SetStringField(TEXT("DisplayName"), DisplayName);
+		return EnumObject;
+	}
+
+	bool TrySetEnumFromPin(UEdGraphPin* Pin, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject)
+	{
+		if (!Pin || !InputsObject.IsValid() || InputName.IsEmpty())
+		{
+			return false;
+		}
+
+		const UEnum* EnumType = GetEnumTypeFromPin(Pin);
+		if (!EnumType)
+		{
+			return false;
+		}
+
+		const FString DefaultValue = GetPinDefaultString(Pin);
+		if (DefaultValue.IsEmpty())
+		{
+			return false;
+		}
+
+		const int64 EnumValue = ResolveEnumValueFromDefaultString(EnumType, DefaultValue);
+		if (EnumValue == INDEX_NONE)
+		{
+			return false;
+		}
+
+		InputsObject->SetObjectField(InputName, BuildEnumValueObject(EnumType, EnumValue));
+		return true;
+	}
+
+	const UEnum* FindEnumTypeForInput(UNiagaraNodeFunctionCall* FunctionNode, const FString& InputName)
+	{
+		if (!FunctionNode || InputName.IsEmpty())
+		{
+			return nullptr;
+		}
+
+		if (UEdGraphPin* InputPin = FindFunctionInputPin(FunctionNode, InputName))
+		{
+			return GetEnumTypeFromPin(InputPin);
+		}
+
+		return nullptr;
+	}
+
 	bool TryReadBoolFromNiagaraVariable(const FNiagaraVariable& Variable, bool& OutValue)
 	{
 		const FNiagaraTypeDefinition Type = Variable.GetType();
@@ -1246,6 +1381,11 @@ namespace
 		}
 
 		if (TrySetBoolFromPin(Pin, InputName, InputsObject))
+		{
+			return true;
+		}
+
+		if (TrySetEnumFromPin(Pin, InputName, InputsObject))
 		{
 			return true;
 		}
@@ -3925,7 +4065,7 @@ bool AppendModuleSnapshots(UNiagaraScript* TargetModule, UNiagaraScript* SourceS
 					continue;
 				}
 
-				const bool bRapidHandled = TrySetRapidIterationValue(SourceScript, FunctionName, InputName, RapidIterationVariables, InputsObject,
+				const bool bRapidHandled = TrySetRapidIterationValue(FunctionNode, SourceScript, FunctionName, InputName, RapidIterationVariables, InputsObject,
 						FallbackDataInterfaces, FunctionGraphCurveInterfaces, OuterCurveInterfaces);
 				if (bRapidHandled)
 				{
