@@ -44,6 +44,14 @@ namespace
 	void GatherRapidIterationDataInterfacesFromParameters(const FNiagaraParameters& Parameters, TArray<UNiagaraDataInterface*>& OutDataInterfaces);
 	/** @brief 構造体を再帰走査して DataInterface を収集する。 */
 	void CollectDataInterfacesFromStruct(const void* StructPtr, const UStruct* StructType, TArray<UNiagaraDataInterface*>& OutDataInterfaces, int32 Depth);
+	/** @brief DataInterface 型のオブジェクトプロパティかを判定する。 */
+	bool IsDataInterfaceObjectProperty(const FObjectPropertyBase* ObjProp);
+	/** @brief UObject から DataInterface を抽出して配列へ追加する。 */
+	void AddDataInterfaceFromObject(UObject* Obj, TArray<UNiagaraDataInterface*>& OutDataInterfaces);
+	/** @brief 配列プロパティ内の DataInterface オブジェクト要素を収集する。 */
+	void CollectDataInterfacesFromArrayObjectValues(const FArrayProperty* ArrayProp, const void* ContainerPtr, TArray<UNiagaraDataInterface*>& OutDataInterfaces);
+	/** @brief マッププロパティ内の DataInterface オブジェクト値を収集する。 */
+	void CollectDataInterfacesFromMapObjectValues(const FMapProperty* MapProp, const void* ContainerPtr, TArray<UNiagaraDataInterface*>& OutDataInterfaces);
 	/** @brief FunctionCall 内のカーブ系 DataInterface を収集する。 */
 	void CollectCurveDataInterfacesFromFunctionCall(UNiagaraNodeFunctionCall* FunctionNode, TArray<UNiagaraDataInterface*>& OutDataInterfaces);
 	/** @brief DynamicInput 由来のカーブ系 DataInterface を収集する。 */
@@ -2242,6 +2250,86 @@ namespace
 		return false;
 	}
 
+	constexpr int32 kMaxDataInterfaceCollectionDepth = 4;
+	constexpr int32 kMaxCollectedDataInterfaces = 256;
+
+	bool IsDataInterfaceObjectProperty(const FObjectPropertyBase* ObjProp)
+	{
+		return ObjProp
+			&& ObjProp->PropertyClass
+			&& ObjProp->PropertyClass->IsChildOf(UNiagaraDataInterface::StaticClass());
+	}
+
+	void AddDataInterfaceFromObject(UObject* Obj, TArray<UNiagaraDataInterface*>& OutDataInterfaces)
+	{
+		if (UNiagaraDataInterface* DataInterface = Cast<UNiagaraDataInterface>(Obj))
+		{
+			OutDataInterfaces.Add(DataInterface);
+		}
+	}
+
+	void CollectDataInterfacesFromArrayObjectValues(const FArrayProperty* ArrayProp, const void* ContainerPtr, TArray<UNiagaraDataInterface*>& OutDataInterfaces)
+	{
+		if (!ArrayProp)
+		{
+			return;
+		}
+
+		const FObjectPropertyBase* InnerObjProp = CastField<FObjectPropertyBase>(ArrayProp->Inner);
+		if (!IsDataInterfaceObjectProperty(InnerObjProp))
+		{
+			return;
+		}
+
+		const void* ArrayPtr = ArrayProp->ContainerPtrToValuePtr<void>(ContainerPtr);
+		FScriptArrayHelper Helper(ArrayProp, ArrayPtr);
+		for (int32 Index = 0; Index < Helper.Num(); ++Index)
+		{
+			const void* ObjPtr = Helper.GetRawPtr(Index);
+			if (!ObjPtr)
+			{
+				continue;
+			}
+
+			UObject* Obj = InnerObjProp->GetObjectPropertyValue(ObjPtr);
+			AddDataInterfaceFromObject(Obj, OutDataInterfaces);
+		}
+	}
+
+	void CollectDataInterfacesFromMapObjectValues(const FMapProperty* MapProp, const void* ContainerPtr, TArray<UNiagaraDataInterface*>& OutDataInterfaces)
+	{
+		if (!MapProp)
+		{
+			return;
+		}
+
+		const FObjectPropertyBase* ValueObjProp = CastField<FObjectPropertyBase>(MapProp->ValueProp);
+		if (!IsDataInterfaceObjectProperty(ValueObjProp))
+		{
+			return;
+		}
+
+		const void* MapPtr = MapProp->ContainerPtrToValuePtr<void>(ContainerPtr);
+		FScriptMapHelper MapHelper(MapProp, MapPtr);
+		for (int32 Index = 0; Index < MapHelper.Num(); ++Index)
+		{
+			if (!MapHelper.IsValidIndex(Index))
+			{
+				continue;
+			}
+
+			const uint8* PairPtr = MapHelper.GetPairPtr(Index);
+			const void* ValuePtr = MapProp->ValueProp->ContainerPtrToValuePtr<void>(PairPtr);
+			if (!ValuePtr)
+			{
+				continue;
+			}
+
+			UObject* Obj = ValueObjProp->GetObjectPropertyValue(ValuePtr);
+			AddDataInterfaceFromObject(Obj, OutDataInterfaces);
+		}
+	}
+
 	void GatherDataInterfacesFromObject(const UObject* Owner, TArray<UNiagaraDataInterface*>& OutDataInterfaces)
 	{
 		if (!Owner)
@@ -2259,38 +2347,16 @@ namespace
 
 			if (const FObjectPropertyBase* ObjProp = CastField<FObjectPropertyBase>(Property))
 			{
-				if (ObjProp->PropertyClass && ObjProp->PropertyClass->IsChildOf(UNiagaraDataInterface::StaticClass()))
+				if (IsDataInterfaceObjectProperty(ObjProp))
 				{
-					if (UNiagaraDataInterface* DataInterface = Cast<UNiagaraDataInterface>(ObjProp->GetObjectPropertyValue_InContainer(Owner)))
-					{
-						OutDataInterfaces.Add(DataInterface);
-					}
+					AddDataInterfaceFromObject(ObjProp->GetObjectPropertyValue_InContainer(Owner), OutDataInterfaces);
 				}
 				continue;
 			}
 
 			if (const FArrayProperty* ArrayProp = CastField<FArrayProperty>(Property))
 			{
-				const FObjectPropertyBase* InnerObjProp = CastField<FObjectPropertyBase>(ArrayProp->Inner);
-				if (!InnerObjProp || !InnerObjProp->PropertyClass || !InnerObjProp->PropertyClass->IsChildOf(UNiagaraDataInterface::StaticClass()))
-				{
-					continue;
-				}
-
-				FScriptArrayHelper Helper(ArrayProp, ArrayProp->ContainerPtrToValuePtr<void>(Owner));
-				for (int32 Index = 0; Index < Helper.Num(); ++Index)
-				{
-					const void* ObjPtr = Helper.GetRawPtr(Index);
-					if (!ObjPtr)
-					{
-						continue;
-					}
-
-					if (UNiagaraDataInterface* DataInterface = Cast<UNiagaraDataInterface>(InnerObjProp->GetObjectPropertyValue(ObjPtr)))
-					{
-						OutDataInterfaces.Add(DataInterface);
-					}
-				}
+				CollectDataInterfacesFromArrayObjectValues(ArrayProp, Owner, OutDataInterfaces);
 			}
 		}
 	}
@@ -2326,7 +2392,7 @@ namespace
 
 	void CollectDataInterfacesFromStruct(const void* StructPtr, const UStruct* StructType, TArray<UNiagaraDataInterface*>& OutDataInterfaces, int32 Depth)
 	{
-		if (!StructPtr || !StructType || Depth > 4 || OutDataInterfaces.Num() > 256)
+		if (!StructPtr || !StructType || Depth > kMaxDataInterfaceCollectionDepth || OutDataInterfaces.Num() > kMaxCollectedDataInterfaces)
 		{
 			return;
 		}
@@ -2341,16 +2407,12 @@ namespace
 
 			if (const FObjectPropertyBase* ObjProp = CastField<FObjectPropertyBase>(Property))
 			{
-				if (!ObjProp->PropertyClass || !ObjProp->PropertyClass->IsChildOf(UNiagaraDataInterface::StaticClass()))
+				if (!IsDataInterfaceObjectProperty(ObjProp))
 				{
 					continue;
 				}
 
-				UObject* Obj = ObjProp->GetObjectPropertyValue_InContainer(StructPtr);
-				if (UNiagaraDataInterface* DataInterface = Cast<UNiagaraDataInterface>(Obj))
-				{
-					OutDataInterfaces.Add(DataInterface);
-				}
+				AddDataInterfaceFromObject(ObjProp->GetObjectPropertyValue_InContainer(StructPtr), OutDataInterfaces);
 				continue;
 			}
 
@@ -2363,36 +2425,21 @@ namespace
 
 			if (const FArrayProperty* ArrayProp = CastField<FArrayProperty>(Property))
 			{
-				const void* ArrayPtr = ArrayProp->ContainerPtrToValuePtr<void>(StructPtr);
-				FScriptArrayHelper Helper(ArrayProp, ArrayPtr);
-
 				if (const FObjectPropertyBase* InnerObjProp = CastField<FObjectPropertyBase>(ArrayProp->Inner))
 				{
-					if (!InnerObjProp->PropertyClass || !InnerObjProp->PropertyClass->IsChildOf(UNiagaraDataInterface::StaticClass()))
+					if (!IsDataInterfaceObjectProperty(InnerObjProp))
 					{
 						continue;
 					}
 
-					for (int32 Index = 0; Index < Helper.Num(); ++Index)
-					{
-						const void* ObjPtr = Helper.GetRawPtr(Index);
-						if (!ObjPtr)
-						{
-							continue;
-						}
-
-						UObject* Obj = InnerObjProp->GetObjectPropertyValue(ObjPtr);
-						if (UNiagaraDataInterface* DataInterface = Cast<UNiagaraDataInterface>(Obj))
-						{
-							OutDataInterfaces.Add(DataInterface);
-						}
-					}
-
+					CollectDataInterfacesFromArrayObjectValues(ArrayProp, StructPtr, OutDataInterfaces);
 					continue;
 				}
 
 				if (const FStructProperty* InnerStructProp = CastField<FStructProperty>(ArrayProp->Inner))
 				{
+					const void* ArrayPtr = ArrayProp->ContainerPtrToValuePtr<void>(StructPtr);
+					FScriptArrayHelper Helper(ArrayProp, ArrayPtr);
 					for (int32 Index = 0; Index < Helper.Num(); ++Index)
 					{
 						const void* InnerPtr = Helper.GetRawPtr(Index);
@@ -2410,42 +2457,21 @@ namespace
 
 			if (const FMapProperty* MapProp = CastField<FMapProperty>(Property))
 			{
-				const void* MapPtr = MapProp->ContainerPtrToValuePtr<void>(StructPtr);
-				FScriptMapHelper MapHelper(MapProp, MapPtr);
-
 				if (const FObjectPropertyBase* ValueObjProp = CastField<FObjectPropertyBase>(MapProp->ValueProp))
 				{
-					if (!ValueObjProp->PropertyClass || !ValueObjProp->PropertyClass->IsChildOf(UNiagaraDataInterface::StaticClass()))
+					if (!IsDataInterfaceObjectProperty(ValueObjProp))
 					{
 						continue;
 					}
 
-					for (int32 Index = 0; Index < MapHelper.Num(); ++Index)
-					{
-						if (!MapHelper.IsValidIndex(Index))
-						{
-							continue;
-						}
-
-						const uint8* PairPtr = MapHelper.GetPairPtr(Index);
-						const void* ValuePtr = MapProp->ValueProp->ContainerPtrToValuePtr<void>(PairPtr);
-						if (!ValuePtr)
-						{
-							continue;
-						}
-
-						UObject* Obj = ValueObjProp->GetObjectPropertyValue(ValuePtr);
-						if (UNiagaraDataInterface* DataInterface = Cast<UNiagaraDataInterface>(Obj))
-						{
-							OutDataInterfaces.Add(DataInterface);
-						}
-					}
-
+					CollectDataInterfacesFromMapObjectValues(MapProp, StructPtr, OutDataInterfaces);
 					continue;
 				}
 
 				if (const FStructProperty* ValueStructProp = CastField<FStructProperty>(MapProp->ValueProp))
 				{
+					const void* MapPtr = MapProp->ContainerPtrToValuePtr<void>(StructPtr);
+					FScriptMapHelper MapHelper(MapProp, MapPtr);
 					for (int32 Index = 0; Index < MapHelper.Num(); ++Index)
 					{
 						if (!MapHelper.IsValidIndex(Index))
@@ -3273,12 +3299,9 @@ namespace
 
 			if (const FObjectPropertyBase* ObjProp = CastField<FObjectPropertyBase>(Property))
 			{
-				if (ObjProp->PropertyClass && ObjProp->PropertyClass->IsChildOf(UNiagaraDataInterface::StaticClass()))
+				if (IsDataInterfaceObjectProperty(ObjProp))
 				{
-					if (UNiagaraDataInterface* DataInterface = Cast<UNiagaraDataInterface>(ObjProp->GetObjectPropertyValue_InContainer(Owner)))
-					{
-						OutDataInterfaces.Add(DataInterface);
-					}
+					AddDataInterfaceFromObject(ObjProp->GetObjectPropertyValue_InContainer(Owner), OutDataInterfaces);
 				}
 				continue;
 			}
@@ -3292,26 +3315,7 @@ namespace
 
 			if (const FArrayProperty* ArrayProp = CastField<FArrayProperty>(Property))
 			{
-				const FObjectPropertyBase* InnerObjProp = CastField<FObjectPropertyBase>(ArrayProp->Inner);
-				if (!InnerObjProp || !InnerObjProp->PropertyClass || !InnerObjProp->PropertyClass->IsChildOf(UNiagaraDataInterface::StaticClass()))
-				{
-					continue;
-				}
-
-				FScriptArrayHelper Helper(ArrayProp, ArrayProp->ContainerPtrToValuePtr<void>(Owner));
-				for (int32 Index = 0; Index < Helper.Num(); ++Index)
-				{
-					const void* ObjPtr = Helper.GetRawPtr(Index);
-					if (!ObjPtr)
-					{
-						continue;
-					}
-
-					if (UNiagaraDataInterface* DataInterface = Cast<UNiagaraDataInterface>(InnerObjProp->GetObjectPropertyValue(ObjPtr)))
-					{
-						OutDataInterfaces.Add(DataInterface);
-					}
-				}
+				CollectDataInterfacesFromArrayObjectValues(ArrayProp, Owner, OutDataInterfaces);
 			}
 		}
 	}
