@@ -35,62 +35,119 @@
 
 namespace
 {
+	/** @brief カーブキーを JSON オブジェクトへ変換する。 */
 	TSharedPtr<FJsonObject> BuildCurveKeyObject(const FRichCurveKey& Key);
+	/** @brief カーブ全キーを JSON 配列へ変換する。 */
 	TArray<TSharedPtr<FJsonValue>> BuildCurveKeysArray(const FRichCurve& Curve);
+	/** @brief ノードからカーブ系 DataInterface を取得する。 */
 	UNiagaraDataInterface* FindCurveDataInterfaceFromNode(const UEdGraphNode* Node);
+	/** @brief ParameterMapSet ノードから対象入力ピンを取得する。 */
 	UEdGraphPin* FindParameterMapSetInputPin(UEdGraphNode* SetNode, const FString& InputName, const FString& FunctionName);
+	/** @brief オブジェクトが保持する DataInterface を収集する。 */
 	void GatherDataInterfacesFromObject(const UObject* Owner, TArray<UNiagaraDataInterface*>& OutDataInterfaces);
+	/** @brief RapidIteration パラメータから DataInterface を収集する。 */
 	void GatherRapidIterationDataInterfacesFromParameters(const FNiagaraParameters& Parameters, TArray<UNiagaraDataInterface*>& OutDataInterfaces);
+	/** @brief 構造体を再帰走査して DataInterface を収集する。 */
 	void CollectDataInterfacesFromStruct(const void* StructPtr, const UStruct* StructType, TArray<UNiagaraDataInterface*>& OutDataInterfaces, int32 Depth);
+	/** @brief FunctionCall 内のカーブ系 DataInterface を収集する。 */
 	void CollectCurveDataInterfacesFromFunctionCall(UNiagaraNodeFunctionCall* FunctionNode, TArray<UNiagaraDataInterface*>& OutDataInterfaces);
+	/** @brief DynamicInput 由来のカーブ系 DataInterface を収集する。 */
 	void CollectCurveDataInterfacesFromDynamicInputs(UNiagaraGraph* Graph, TArray<UNiagaraDataInterface*>& OutDataInterfaces);
+	/** @brief FunctionCall ピンから入力名候補を収集する。 */
 	void GatherInputNamesFromFunctionCallPins(UNiagaraNodeFunctionCall* FunctionNode, TSet<FString>& OutInputNames);
+	/** @brief RapidIteration 変数名から入力名候補を収集する。 */
 	void GatherInputNamesFromRapidIteration(const FString& FunctionName, const TArray<FNiagaraVariable>& RapidIterationVariables, TSet<FString>& OutInputNames);
+	/** @brief DataInterface からカーブ JSON を構築する。 */
 	TSharedPtr<FJsonObject> BuildCurveObjectFromDataInterface(UNiagaraDataInterface* DataInterface);
+	/** @brief FunctionCall の入力ピンを名前で検索する。 */
 	UEdGraphPin* FindFunctionInputPin(UNiagaraNodeFunctionCall* FunctionNode, const FString& InputName);
+	/** @brief StaticSwitch 値を取得して JSON へ設定する。 */
 	bool TrySetStaticSwitchValue(UNiagaraNodeFunctionCall* FunctionNode, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject);
+	/** @brief カーブチャネル表現。 */
 	struct FCurveChannel;
+	/** @brief 構造体を再帰走査してカーブチャネルを抽出する。 */
 	void CollectCurveChannelsFromStruct(const void* StructPtr, const UStruct* StructType, int32 Depth, TArray<FCurveChannel>& OutChannels);
+	/** @brief DataInterface からカーブチャネルを抽出する。 */
 	bool GetCurveChannelsFromDataInterface(UNiagaraDataInterface* DataInterface, TArray<FCurveChannel>& OutChannels);
+	/** @brief DataInterface がカーブ情報を保持するか判定する。 */
 	bool HasCurveDataInterface(UNiagaraDataInterface* DataInterface);
+	/** @brief DynamicInput 用に最適な外側カーブ DataInterface を選択する。 */
 	UNiagaraDataInterface* SelectOuterCurveInterfaceForDynamicInput(const TArray<UNiagaraDataInterface*>& Interfaces,
 		const FString& ScriptPath, const FString& DynamicInputName, const FString& InputName);
+	/** @brief FunctionCall ノード経由でカーブ値設定を試行する。 */
 	bool TrySetCurvesFromFunctionCallNode(UNiagaraNodeFunctionCall* FunctionNode, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject,
 		const FString& FunctionName, const TArray<FNiagaraVariable>& RapidIterationVariables, const FNiagaraParameterStore& RapidIterationParameters,
 		const TArray<UNiagaraDataInterface*>& OuterCurveInterfaces, const FString& SourceScriptPath);
+	/** @brief オブジェクト配下を深く辿って DataInterface を収集する。 */
 	void CollectDataInterfacesFromObjectDeep(const UObject* Owner, TArray<UNiagaraDataInterface*>& OutDataInterfaces);
+	/** @brief Outer オブジェクトからカーブ系 DataInterface を収集する。 */
 	void CollectCurveInterfacesFromOuter(const UObject* Outer, TArray<UNiagaraDataInterface*>& OutDataInterfaces);
+	/** @brief 入力名に対して適切な外側カーブ DataInterface を選択する。 */
 	UNiagaraDataInterface* SelectOuterCurveInterface(const TArray<UNiagaraDataInterface*>& Interfaces, const FString& ScriptPath, const FString& InputName);
+	/** @brief RapidIteration 由来の CurveScale でカーブ JSON を上書きする。 */
 	bool TryOverrideCurveScale(const FString& FunctionName, const FString& InputName, const TArray<FNiagaraVariable>& RapidIterationVariables,
 		const FNiagaraParameterStore& RapidIterationParameters, const TSharedPtr<FJsonObject>& CurveObject);
+	/** @brief 入力名がカーブ系入力かを判定する。 */
 	bool IsCurveInputName(const FString& InputName);
+	/** @brief グラフ内 ParameterMapSet から対象入力ピンを検索する。 */
 	UEdGraphPin* FindParameterMapSetInputPinInGraph(UNiagaraGraph* Graph, const FString& InputName, const FString& FunctionName);
+	/** @brief DynamicInput 経由のカーブ値設定を試行する。 */
 	bool TrySetDynamicInputCurveValue(UNiagaraNodeFunctionCall* FunctionNode, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject,
 		const FString& FunctionName, const TArray<FNiagaraVariable>& RapidIterationVariables, const FNiagaraParameterStore& RapidIterationParameters,
 		const TArray<UNiagaraDataInterface*>& OuterCurveInterfaces, const FString& SourceScriptPath);
+	/** @brief JSON 入力フィールド名の衝突を避ける一意名を生成する。 */
 	FString GetUniqueInputFieldName(const TSharedPtr<FJsonObject>& InputsObject, const FString& InputName, const FString& Suffix);
+	/** @brief Bool ピンから値を取得して JSON へ設定する。 */
 	bool TrySetBoolFromPin(UEdGraphPin* Pin, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject);
+	/** @brief ピンのデフォルト値を JSON へ設定する。 */
 	bool TrySetDefaultValueFromPin(UEdGraphPin* Pin, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject);
+	/** @brief FunctionNode 側の既定値を JSON へ設定する。 */
 	bool TrySetDefaultValueFromFunctionNode(UNiagaraNodeFunctionCall* FunctionNode, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject);
+	/** @brief ModuleScript 側の既定値を JSON へ設定する。 */
 	bool TrySetDefaultValueFromModuleScript(UNiagaraScript* ModuleScript, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject);
+	/** @brief Module の RapidIteration 値から既定値設定を試行する。 */
 	bool TrySetDefaultValueFromModuleRapidIteration(UNiagaraScript* ModuleScript, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject);
+	/** @brief グラフメタデータ由来の既定値設定を試行する。 */
 	bool TrySetDefaultValueFromGraphMetadata(UNiagaraGraph* Graph, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject);
+	/** @brief ParameterMapGet ノードから既定値設定を試行する。 */
 	bool TrySetDefaultValueFromParameterMapGetNode(UEdGraphNode* GetNode, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject);
+	/** @brief ParameterMapGet の値ピンを検索する。 */
 	UEdGraphPin* FindParameterMapGetValuePin(UEdGraphNode* GetNode, const FString& InputName);
+	/** @brief ピンのデフォルト文字列を取得する。 */
 	FString GetPinDefaultString(UEdGraphPin* Pin);
+	/** @brief 呼び出し先グラフ入力から既定値設定を試行する。 */
 	bool TrySetDefaultValueFromCalledGraphInputs(UNiagaraNodeFunctionCall* FunctionNode, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject);
+	/** @brief ピン型が Bool かを判定する。 */
 	bool IsBoolPinType(const UEdGraphPin* Pin);
+	/** @brief ピンから Enum 型情報を取得する。 */
 	const UEnum* GetEnumTypeFromPin(const UEdGraphPin* Pin);
+	/** @brief デフォルト文字列から Enum 値へ解決する。 */
 	int64 ResolveEnumValueFromDefaultString(const UEnum* EnumType, const FString& DefaultValue);
+	/** @brief Enum 値を JSON オブジェクトへ変換する。 */
 	TSharedPtr<FJsonObject> BuildEnumValueObject(const UEnum* EnumType, int64 EnumValue);
+	/** @brief Enum ピン値を取得して JSON へ設定する。 */
 	bool TrySetEnumFromPin(UEdGraphPin* Pin, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject);
+	/** @brief 入力名に対応する Enum 型を探索する。 */
 	const UEnum* FindEnumTypeForInput(UNiagaraNodeFunctionCall* FunctionNode, const FString& InputName);
+	/** @brief NiagaraVariable から Bool 値を読み取る。 */
 	bool TryReadBoolFromNiagaraVariable(const FNiagaraVariable& Variable, bool& OutValue);
+	/** @brief 入力名比較用にトークンを正規化する。 */
 	FString NormalizeInputToken(const FString& In);
+	/** @brief 入力トークン同士の同値性を判定する。 */
 	bool IsSameInputToken(const FString& A, const FString& B);
+	/** @brief メタデータ構造体から既定値設定を試行する。 */
 	bool TrySetDefaultFromMetadataStruct(const void* StructPtr, const UStruct* StructType, const FString& InputName, const TSharedPtr<FJsonObject>& InputsObject, int32 Depth);
+	/** @brief 変数名に相当するキー名抽出を試行する。 */
 	bool TryExtractVariableLikeName(const void* KeyPtr, const FProperty* KeyProp, FString& OutName);
+	/** @brief DataInterface の CurveScale フィールドを JSON へ反映する。 */
 	bool TrySetCurveScaleFieldFromDataInterface(const UNiagaraDataInterface* DataInterface, const TSharedPtr<FJsonObject>& CurveObject);
+	/** @brief ノードの入力 ParameterMap ピンを取得する。 */
+	UEdGraphPin* FindParameterMapInputPin(const UEdGraphNode& Node);
+	/** @brief モジュールグラフから入力名一覧を収集する。 */
+	void GatherModuleInputNames(UNiagaraScript* ModuleScript, TSet<FString>& OutInputNames);
+	/** @brief ParameterMap のリンクを辿って対象モジュール呼び出しノードを収集する。 */
+	void TraverseParameterMapChain(UEdGraphPin* StartPin, UNiagaraScript* TargetModule, TSet<UEdGraphNode*>& VisitedNodes,
+		TArray<UNiagaraNodeFunctionCall*>& OutModuleNodes);
 
 	UEdGraphPin* FindParameterMapInputPin(const UEdGraphNode& Node)
 	{
@@ -3976,24 +4033,32 @@ namespace
 		return Enum ? Enum->GetNameStringByValue(static_cast<int64>(Usage)) : TEXT("Unknown");
 	}
 
-bool AppendModuleSnapshots(UNiagaraScript* TargetModule, UNiagaraScript* SourceScript, ENiagaraScriptUsage Usage,
+	/**
+	 * @brief 単一 ScriptUsage 分のモジュール入力スナップショットを出力配列へ追加する。
+	 *
+	 * @return 1 件以上のモジュールエントリを追加できた場合 true。
+	 */
+	bool AppendModuleSnapshots(UNiagaraScript* TargetModule, UNiagaraScript* SourceScript, ENiagaraScriptUsage Usage,
 		const FString& UsageLabel, const TArray<UNiagaraDataInterface*>& FallbackDataInterfaces,
 		TArray<TSharedPtr<FJsonValue>>& OutModules)
-{
+	{
 		if (!TargetModule || !SourceScript)
 		{
 			return false;
 		}
 
+		// スナップショット抽出は SourceScript の解決済みグラフに依存するため、先に妥当性を確認する。
 		UNiagaraScriptSource* ScriptSource = Cast<UNiagaraScriptSource>(SourceScript->GetLatestSource());
 		if (!ScriptSource || !ScriptSource->NodeGraph)
 		{
 			return false;
 		}
 
+		// DynamicInput のカーブ情報は先に一括収集し、各 FunctionNode のフォールバックとして再利用する。
 		TArray<UNiagaraDataInterface*> DynamicInputCurveInterfaces;
 		CollectCurveDataInterfacesFromDynamicInputs(ScriptSource->NodeGraph, DynamicInputCurveInterfaces);
 
+		// 他 Usage の値混入を防ぐため、探索対象を要求された Usage に限定する。
 		TArray<UNiagaraNodeFunctionCall*> FunctionNodes;
 		GatherModuleNodesForUsage(ScriptSource->NodeGraph, TargetModule, Usage, FunctionNodes);
 
@@ -4016,10 +4081,12 @@ bool AppendModuleSnapshots(UNiagaraScript* TargetModule, UNiagaraScript* SourceS
 
 			TSharedPtr<FJsonObject> InputsObject = MakeShared<FJsonObject>();
 			TSet<FString> InputNames;
+			// 出力キーの安定性を保つため、まずモジュール定義側の入力名を採用する。
 			GatherModuleInputNames(TargetModule, InputNames);
 
 			if (InputNames.Num() == 0)
 			{
+				// 直接取得できないモジュール向けに FunctionNode から入力名を補完する。
 				GatherInputNamesFromFunctionNode(FunctionNode, InputNames);
 			}
 			GatherInputNamesFromFunctionCallPins(FunctionNode, InputNames);
@@ -4052,6 +4119,7 @@ bool AppendModuleSnapshots(UNiagaraScript* TargetModule, UNiagaraScript* SourceS
 			CollectCurveInterfacesFromOuter(OuterOwner, OuterCurveInterfaces);
 			for (const FString& InputName : InputNames)
 			{
+				// 値解決の優先度を固定し、取得元の揺れで出力内容が変わりにくいようにする。
 				const bool bCurveHandled = TrySetDynamicInputCurveValue(FunctionNode, InputName, InputsObject, FunctionName, RapidIterationVariables,
 						SourceScript->RapidIterationParameters, OuterCurveInterfaces, SourceScript->GetPathName());
 				if (bCurveHandled)
@@ -4087,6 +4155,7 @@ bool AppendModuleSnapshots(UNiagaraScript* TargetModule, UNiagaraScript* SourceS
 
 			if (InputsObject->Values.Num() == 0)
 			{
+				// ユーザー入力を取得できなかったモジュールはノイズ削減のため出力対象外にする。
 				continue;
 			}
 
@@ -4098,15 +4167,18 @@ bool AppendModuleSnapshots(UNiagaraScript* TargetModule, UNiagaraScript* SourceS
 	}
 }
 
+/** @brief Script が Niagara Module Script の場合に true を返す。 */
 bool FNiagaraModuleSnapshotProcessor::IsModuleScript(const UNiagaraScript* Script)
 {
 	return Script && Script->GetUsage() == ENiagaraScriptUsage::Module;
 }
 
+/** @brief AssetRegistry 検索時のパス不一致を防ぐため、検索パスを正規化する。 */
 FString FNiagaraModuleSnapshotProcessor::NormalizeGamePath(const FString& Path)
 {
 	FString CleanPath = Path;
 	CleanPath.TrimStartAndEndInline();
+	// 末尾スラッシュ差分による同一パスの不一致を防ぐため、末尾区切りを除去する。
 	while (CleanPath.EndsWith(TEXT("/")))
 	{
 		CleanPath.LeftChopInline(1);
@@ -4114,17 +4186,23 @@ FString FNiagaraModuleSnapshotProcessor::NormalizeGamePath(const FString& Path)
 	return CleanPath;
 }
 
+/** @brief 再帰 AssetRegistry フィルタに利用可能な `/Game` パスかを検証する。 */
 bool FNiagaraModuleSnapshotProcessor::IsValidGamePath(const FString& Path)
 {
 	const FString CleanPath = NormalizeGamePath(Path);
 	return CleanPath.StartsWith(TEXT("/Game")) && FPackageName::IsValidLongPackageName(CleanPath, false);
 }
 
+/**
+ * @brief 対象モジュールを使用する Niagara System からスナップショット JSON を生成する。
+ * @return スナップショットファイル生成に成功した場合 true。
+ */
 bool FNiagaraModuleSnapshotProcessor::CreateSnapshot(UNiagaraScript* ModuleScript, const FString& SearchPath, FString& OutErrorMessage, FString& OutOutputPath)
 {
 	OutErrorMessage.Reset();
 	OutOutputPath.Reset();
 
+	// 早期バリデーションでエラー原因を明確化し、途中生成の中途半端な出力を防ぐ。
 	if (!IsModuleScript(ModuleScript))
 	{
 		OutErrorMessage = TEXT("Please select a Niagara Module Script asset.");
@@ -4139,6 +4217,7 @@ bool FNiagaraModuleSnapshotProcessor::CreateSnapshot(UNiagaraScript* ModuleScrip
 
 	const FString NormalizedPath = NormalizeGamePath(SearchPath);
 
+	// 検索範囲を指定パス配下の NiagaraSystem に限定し、結果スコープを安定化させる。
 	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
 	FARFilter Filter;
 	Filter.ClassNames.Add(UNiagaraSystem::StaticClass()->GetFName());
@@ -4183,6 +4262,7 @@ bool FNiagaraModuleSnapshotProcessor::CreateSnapshot(UNiagaraScript* ModuleScrip
 						continue;
 					}
 
+					// 値解決できない入力に備え、Emitter 側 DataInterface をフォールバックとして収集する。
 					TArray<UNiagaraDataInterface*> FallbackDataInterfaces;
 					if (EmitterData)
 					{
@@ -4222,6 +4302,7 @@ bool FNiagaraModuleSnapshotProcessor::CreateSnapshot(UNiagaraScript* ModuleScrip
 	FString OutputString;
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutputString);
 	FJsonSerializer::Serialize(RootObject.ToSharedRef(), Writer);
+	// Windows ベースのツールチェーンで差分を安定させるため、改行を CRLF に統一する。
 	OutputString.ReplaceInline(TEXT("\r\n"), TEXT("\n"));
 	OutputString.ReplaceInline(TEXT("\r"), TEXT("\n"));
 	OutputString.ReplaceInline(TEXT("\n"), TEXT("\r\n"));
